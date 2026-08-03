@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# Running an oracle makes the real Claude Code binary write its own state into
+# the fixture's sandboxed home — including a machineID and userID. Those must
+# never be committed.
+test/fixtures/**/.fake-home/.claude.json
+test/fixtures/**/.fake-home/.claude/backups/
+test/fixtures/**/.fake-home/.claude/statsig/
+test/fixtures/**/.fake-home/.claude/*.backup*
+
+# Scratch output of the hook oracle. The recording in .conformance/ is the
+# committed artifact; this is just the raw probe log.
+test/fixtures/**/.hooklog
+
+# Committed on purpose — these are the expectations CI replays:
+#   test/fixtures/**/.conformance/
+#   test/fixtures/**/.oracle.json
+# and the fixtures need their own local settings layer to test against:
+#   test/fixtures/**/settings.local.json

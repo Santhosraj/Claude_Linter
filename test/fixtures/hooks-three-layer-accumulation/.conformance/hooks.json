@@ -1,0 +1,9 @@
+{
+  "claudeVersion": "2.1.220",
+  "event": "UserPromptSubmit",
+  "executed": [
+    "user",
+    "projectShared",
+    "projectLocal"
+  ]
+}

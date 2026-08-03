@@ -1,0 +1,20 @@
+{
+  "model": "claude-opus-4-8",
+  "theme": "dark",
+  "env": {
+    "USER_SCOPE": "home",
+    "PROJECT_SCOPE": "user-value-that-loses"
+  },
+  "permissions": {
+    "allow": ["Bash(ls *)"],
+    "deny": ["Bash(rm -rf *)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "echo user-level-audit" }]
+      }
+    ]
+  }
+}

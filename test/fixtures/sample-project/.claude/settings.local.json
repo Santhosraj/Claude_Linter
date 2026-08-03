@@ -1,0 +1,15 @@
+{
+  // local override for this machine
+  "model": "claude-opus-5",
+  "permissions": {
+    "allow": ["Bash(npm run *)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [{ "type": "command", "command": "./scripts/local-check.sh" }]
+      }
+    ]
+  }
+}

@@ -1,0 +1,87 @@
+name: claude-config-lint
+description: Lint CLAUDE.md, hooks, and MCP config for silent conflicts, dead references, and token bloat.
+author: claude-config-lint contributors
+
+branding:
+  icon: alert-triangle
+  color: orange
+
+inputs:
+  working-directory:
+    description: Directory to lint.
+    required: false
+    default: "."
+  fail-on:
+    description: Severity at which to fail the job — `error` or `warning`.
+    required: false
+    default: error
+  strict:
+    description: Include heuristic (info-tier) findings.
+    required: false
+    default: "false"
+  semantic:
+    description: >
+      Adjudicate candidate rule conflicts with a model. Requires anthropic-api-key.
+      Off by default — the deterministic checks need no credentials.
+    required: false
+    default: "false"
+  anthropic-api-key:
+    description: >
+      Optional. Enables exact token counts and, with `semantic: true`, the
+      adjudication pass. Without it the action still runs fully; token figures
+      are reported as estimates.
+    required: false
+  upload-sarif:
+    description: Upload results to GitHub code scanning.
+    required: false
+    default: "true"
+  version:
+    description: npm version spec of claude-config-lint to run.
+    required: false
+    default: latest
+
+outputs:
+  sarif-file:
+    description: Path to the generated SARIF file.
+    value: ${{ steps.run.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run cclint
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        set -uo pipefail
+
+        args=(--format=sarif)
+        [ "${{ inputs.strict }}" = "true" ] && args+=(--strict)
+        [ "${{ inputs.semantic }}" = "true" ] && args+=(--semantic)
+        # Without a key, skip the network entirely rather than waiting on
+        # requests that cannot succeed.
+        [ -z "${ANTHROPIC_API_KEY:-}" ] && args+=(--offline)
+
+        sarif="$RUNNER_TEMP/cclint.sarif"
+        npx --yes "claude-config-lint@${{ inputs.version }}" "${args[@]}" > "$sarif"
+        status=$?
+
+        echo "sarif-file=$sarif" >> "$GITHUB_OUTPUT"
+
+        # Re-run for a readable job log. Cheap: token counts are cached from
+        # the pass above, and the deterministic checks are pure file I/O.
+        text_args=(--fail-on="${{ inputs.fail-on }}")
+        [ "${{ inputs.strict }}" = "true" ] && text_args+=(--strict)
+        [ -z "${ANTHROPIC_API_KEY:-}" ] && text_args+=(--offline)
+        npx --yes "claude-config-lint@${{ inputs.version }}" "${text_args[@]}" || status=$?
+
+        exit $status
+
+    - name: Upload SARIF
+      if: ${{ always() && inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.run.outputs.sarif-file }}
+        category: cclint

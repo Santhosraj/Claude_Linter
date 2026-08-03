@@ -1,0 +1,19 @@
+{
+  "claudeVersion": "2.1.220",
+  "servers": {
+    "good-server": {
+      "status": "ok"
+    },
+    "needs-secret": {
+      "status": "ok"
+    },
+    "broken-transport": {
+      "status": "skipped",
+      "reason": "Skipped — unknown MCP server type \"websocket\" for server \"broken-transport\""
+    },
+    "missing-target": {
+      "status": "skipped",
+      "reason": "Skipped — invalid MCP server config for \"missing-target\": command: expected string, received undefined"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "echo projectLocal >> \"$CLAUDE_PROJECT_DIR/.hooklog\"" }
+        ]
+      }
+    ]
+  }
+}

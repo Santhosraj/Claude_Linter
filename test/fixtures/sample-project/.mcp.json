@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "good-server": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp/server.js"]
+    },
+    "broken-transport": {
+      "type": "websocket",
+      "command": "whatever"
+    },
+    "missing-target": {
+      "type": "stdio"
+    },
+    "needs-secret": {
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "env": {
+        "TOKEN": "${CLAUDE_LINT_FIXTURE_UNSET_TOKEN}"
+      }
+    }
+  }
+}

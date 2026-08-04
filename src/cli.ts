@@ -8,6 +8,8 @@
  *   2  the tool itself failed
  */
 
+import { existsSync, statSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import pc from "picocolors";
 
@@ -38,6 +40,7 @@ ${pc.bold("Options")}
   --context-window <n>         override the context window used for percentages
   --cwd <dir>                  directory to lint (default: cwd)
   --home <dir>                 override the home directory used to find user config
+  --project-root <dir>         force the project root instead of detecting it
   --no-budget                  skip the token pass
   --fail-on <error|warning>    exit 1 at this severity or above (default: error)
   --version, --help
@@ -60,6 +63,7 @@ async function main(argv: string[]): Promise<number> {
       "context-window": { type: "string" },
       cwd: { type: "string" },
       home: { type: "string" },
+      "project-root": { type: "string" },
       // node:util parseArgs has no `--no-x` negation, so the opt-out is an
       // explicit flag rather than a negated boolean.
       "no-budget": { type: "boolean", default: false },
@@ -81,6 +85,21 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  // ---- argument validation -------------------------------------------------
+  //
+  // All of this exists because of one real failure: an unquoted Windows path
+  // containing spaces. The shell split it, `--cwd` silently received a
+  // truncated directory that did not exist, the leftover fragments became
+  // ignored positionals, and discovery cheerfully walked up from the bad path
+  // until it found an unrelated `.git` several levels above. The report that
+  // came out was internally consistent and completely wrong — the worst kind of
+  // output. Refusing bad input is the fix.
+  const argError = validateArgs(positionals, values);
+  if (argError) {
+    process.stderr.write(argError);
+    return 2;
+  }
+
   const command = positionals[0] ?? "lint";
   const contextWindow = values["context-window"]
     ? Number(values["context-window"])
@@ -94,6 +113,7 @@ async function main(argv: string[]): Promise<number> {
   const result = await analyze({
     cwd: values.cwd,
     home: values.home,
+    projectRoot: values["project-root"],
     offline: values.offline,
     model: values.model,
     contextWindow,
@@ -182,6 +202,86 @@ async function main(argv: string[]): Promise<number> {
   return failing > 0 ? 1 : 0;
 }
 
+const COMMANDS = new Set(["lint", "explain", "budget", "doctor"]);
+
+/** True when `root` is a strict ancestor of `start`. */
+function relativeIsAbove(root: string, start: string): boolean {
+  const r = resolve(root);
+  const s = resolve(start);
+  return s !== r && s.startsWith(r.endsWith(sep) ? r : r + sep);
+}
+
+/** Directory-valued flags. A bad value here poisons the whole run silently. */
+const DIR_FLAGS = ["cwd", "home", "project-root"] as const;
+
+/**
+ * Reject malformed invocations up front, and — critically — say when the cause
+ * looks like an unquoted path.
+ */
+function validateArgs(
+  positionals: string[],
+  values: Record<string, unknown>,
+): string | undefined {
+  const first = positionals[0];
+
+  if (first !== undefined && !COMMANDS.has(first)) {
+    return (
+      pc.red(`Unknown command "${first}".\n`) +
+      pc.dim(`  Expected one of: ${[...COMMANDS].join(", ")}\n`) +
+      quotingHint(positionals)
+    );
+  }
+
+  const extra = positionals.slice(1);
+  const allowed = first === "explain" ? 1 : 0;
+  if (extra.length > allowed) {
+    return (
+      pc.red(`Unexpected argument${extra.length - allowed === 1 ? "" : "s"}: `) +
+      pc.red(extra.slice(allowed).map((a) => `"${a}"`).join(", ")) +
+      "\n" +
+      quotingHint(positionals)
+    );
+  }
+
+  for (const flag of DIR_FLAGS) {
+    const value = values[flag];
+    if (typeof value !== "string") continue;
+    if (!existsSync(value)) {
+      return (
+        pc.red(`--${flag} does not exist: ${value}\n`) +
+        quotingHint(positionals, value)
+      );
+    }
+    if (!statSync(value).isDirectory()) {
+      return pc.red(`--${flag} is not a directory: ${value}\n`);
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * The single most likely cause of a bad path on Windows is a space that was
+ * never quoted, which the shell turns into extra bare arguments. Saying so
+ * beats making the user work it out.
+ */
+function quotingHint(_positionals: string[], _badValue?: string): string {
+  // Deliberately unconditional. An earlier version only showed this when a
+  // stray argument "looked like" a path, and promptly missed the real case:
+  // the shell had already eaten the separators, so the fragment left behind
+  // ("copytest-api") looked like nothing in particular. Whenever we reject
+  // stray arguments or a missing directory, quoting is the overwhelmingly
+  // likely cause — a redundant hint costs a line, a missing one costs an hour.
+  return (
+    pc.yellow("\n  Does the path contain spaces? Wrap it in quotes:\n") +
+    pc.dim('    cclint doctor --cwd "D:\\path with spaces\\project"\n') +
+    pc.dim(
+      "  Without quotes the shell splits the path, so --cwd receives only the\n" +
+        "  first fragment and the rest arrive as separate arguments.\n",
+    )
+  );
+}
+
 function renderDoctor(
   result: Awaited<ReturnType<typeof analyze>>,
   root: string,
@@ -189,8 +289,34 @@ function renderDoctor(
   const lines: string[] = [];
   const d = result.context.discovery;
 
+  const prov = d.rootProvenance;
+  const why: Record<typeof prov.source, string> = {
+    forced: "forced via --project-root",
+    strong: `found ${prov.marker ?? "a marker"} here`,
+    weak: `nearest ${prov.marker ?? "config file"} (no .git or .claude found)`,
+    fallback: "no marker found — using the starting directory",
+  };
+
   lines.push(pc.bold("Discovered layers"));
-  lines.push(pc.dim(`  project root: ${d.projectRoot}`));
+  lines.push(`  project root: ${d.projectRoot}`);
+  lines.push(pc.dim(`                ${why[prov.source]}`));
+
+  // The root can legitimately sit above where you pointed — but if the
+  // directory you pointed at has its own CLAUDE.md, that file is being treated
+  // as on-demand subtree memory rather than always-loaded project memory, and
+  // the per-turn budget will read as ~0. Say so rather than let the number
+  // quietly mislead.
+  if (relativeIsAbove(d.projectRoot, d.startedFrom)) {
+    lines.push("");
+    lines.push(pc.yellow(`  ! The root is above the directory you pointed at.`));
+    lines.push(pc.dim(`      you pointed at: ${d.startedFrom}`));
+    lines.push(
+      pc.dim(
+        "      Config there is treated as subtree memory, not project memory.\n" +
+          `      To lint that directory alone: --project-root "${d.startedFrom}"`,
+      ),
+    );
+  }
   lines.push("");
 
   lines.push(pc.bold("  settings"));

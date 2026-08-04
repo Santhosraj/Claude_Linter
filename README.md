@@ -10,9 +10,19 @@ turn without realising it.
 npx cclint
 npx cclint explain hooks.PreToolUse
 npx cclint budget
+npx cclint doctor
 ```
 
 The default run is **fully offline, free, and fast**. No API key, no network.
+
+> **Quote paths containing spaces.** `--cwd "D:\my project"`, not `--cwd D:\my project`.
+> Unquoted, the shell splits the path and the flag receives only the first
+> fragment. `cclint` rejects that with exit 2 rather than guessing — but the
+> quotes save you the round trip.
+
+Start with `doctor`. It prints the project root, the marker that decided it, and
+every config file found — so you can confirm discovery is right before trusting
+any finding.
 
 ---
 
@@ -186,6 +196,10 @@ capped** rather than reading as complete coverage.
 {
   "ignore": ["hooks/command-not-on-path"],
   "severity": { "memory/redundant-across-layers": "error" },
+  // Project-relative globs dropped from discovery entirely — no findings, no
+  // token cost. For example/ or fixture config that is real but describes a
+  // test scenario rather than this project.
+  "excludePaths": ["test/fixtures/**", "examples/**"],
   "model": "claude-opus-5",
   // Extend the conflict-axis library without patching source.
   "axes": [

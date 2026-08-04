@@ -1,0 +1,10 @@
+{
+  // cclint linting itself.
+  //
+  // The fixtures under test/ are real CLAUDE.md / .mcp.json / settings.json
+  // files — discovery is right to find them — but they encode deliberately
+  // broken scenarios for the test suite, so linting them here is pure noise.
+  // The conformance suite already asserts we report exactly the right things
+  // about them.
+  "excludePaths": ["test/fixtures/**"]
+}

@@ -160,6 +160,14 @@ export const MERGE_RULES: MergeRule[] = [
   { path: "autoUpdatesChannel", strategy: "override", confidence: "assumed", note: "Scalar." },
   { path: "spinnerTipsEnabled", strategy: "override", confidence: "assumed", note: "Scalar." },
   { path: "agent", strategy: "override", confidence: "assumed", note: "Scalar default agent name." },
+
+  // Observed in real user settings while dogfooding. Adding them is not
+  // cosmetic: an unlisted key is reported as possibly-a-typo, so every genuine
+  // setting we omit is noise charged against the tool's credibility.
+  { path: "switchModelsOnFlag", strategy: "override", confidence: "assumed", note: "Scalar." },
+  { path: "agentPushNotifEnabled", strategy: "override", confidence: "assumed", note: "Scalar." },
+  { path: "inputNeededNotifEnabled", strategy: "override", confidence: "assumed", note: "Scalar." },
+  { path: "alwaysThinkingEnabled", strategy: "override", confidence: "assumed", note: "Scalar." },
 ];
 
 /** Fallback when a key is not in the table at all. */

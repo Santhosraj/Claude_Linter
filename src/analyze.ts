@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { discover, isFile, type DiscoveryOptions } from "./discovery/layers.js";
+import { discover, isFile, relative as relativePath, type DiscoveryOptions } from "./discovery/layers.js";
 import { parseAxes, BUILTIN_AXES, type Axis } from "./rules/axes.js";
 import { hookRules } from "./rules/hooks.js";
 import { mcpRules } from "./rules/mcp.js";
@@ -40,9 +40,49 @@ export interface LintConfig {
   ignore?: string[];
   /** Per-rule severity overrides. */
   severity?: Record<string, Severity | "off">;
+  /**
+   * Project-relative globs to drop from discovery entirely — `*` matches within
+   * a path segment, `**` across segments.
+   *
+   * Needed by any repo that keeps example or fixture config under version
+   * control: those files are real CLAUDE.md and .mcp.json files, so discovery is
+   * right to find them, but they describe a test scenario rather than this
+   * project and linting them is pure noise.
+   */
+  excludePaths?: string[];
   axes?: unknown;
   model?: string;
   contextWindow?: number;
+}
+
+/** Convert a simple `*` / `**` glob into an anchored regex. */
+export function globToRegExp(glob: string): RegExp {
+  const escaped = glob
+    .split("/")
+    .map((segment) =>
+      segment === "**"
+        ? "\u0000DOUBLE\u0000"
+        : segment.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*"),
+    )
+    .join("/");
+
+  // `a/**/b` must also match `a/b`, so the separator is folded into the wildcard.
+  const pattern = escaped
+    .replace(/\/\u0000DOUBLE\u0000\//g, "(?:/.*)?/")
+    .replace(/\u0000DOUBLE\u0000\//g, "(?:.*/)?")
+    .replace(/\/\u0000DOUBLE\u0000/g, "(?:/.*)?")
+    .replace(/\u0000DOUBLE\u0000/g, ".*");
+
+  return new RegExp(`^${pattern}$`);
+}
+
+function makeExcluder(root: string, globs: string[] | undefined): (file: string) => boolean {
+  if (!globs || globs.length === 0) return () => false;
+  const patterns = globs.map(globToRegExp);
+  return (file: string) => {
+    const rel = relativePath(root, file).split("\\").join("/");
+    return patterns.some((p) => p.test(rel));
+  };
 }
 
 export interface AnalysisResult {
@@ -77,8 +117,18 @@ export function loadConfig(projectRoot: string): LintConfig {
 }
 
 export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisResult> {
-  const discovery = discover(options);
-  const config = loadConfig(discovery.projectRoot);
+  const discovered = discover(options);
+  const config = loadConfig(discovered.projectRoot);
+
+  // Apply excludePaths before anything reads the file lists, so an excluded
+  // file is invisible to rules AND to the token budget.
+  const isExcluded = makeExcluder(discovered.projectRoot, config.excludePaths);
+  const discovery = {
+    ...discovered,
+    settings: discovered.settings.filter((s) => !isExcluded(s.file)),
+    memory: discovered.memory.filter((m) => !isExcluded(m.file)),
+    mcp: discovered.mcp.filter((m) => !isExcluded(m.file)),
+  };
 
   // --- settings ------------------------------------------------------------
   const inputs: LayerInput[] = [];

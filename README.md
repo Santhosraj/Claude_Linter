@@ -234,7 +234,7 @@ capped** rather than reading as complete coverage.
 ## GitHub Action
 
 ```yaml
-- uses: your-org/claude-config-lint@v1
+- uses: Santhosraj/Claude_Linter@v1
   with:
     fail-on: error
     # Optional. Without it the action still runs fully; token figures

@@ -30,7 +30,7 @@ export function toSarif(
           driver: {
             name: "cclint",
             version,
-            informationUri: "https://github.com/your-org/claude-config-lint",
+            informationUri: "https://github.com/Santhosraj/Claude_Linter",
             rules: ruleIds.map((id) => ({
               id,
               shortDescription: { text: describeRule(id) },

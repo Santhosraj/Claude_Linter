@@ -45,8 +45,36 @@ export interface RootProvenance {
   source: "forced" | "strong" | "weak" | "fallback";
 }
 
+/**
+ * Whether Claude Code considers this workspace trusted.
+ *
+ * This is not a detail: **project-layer `permissions.allow` entries are ignored
+ * entirely in an untrusted workspace.** Verified against the binary, which says
+ * so out loud:
+ *
+ *   Ignoring 2 permissions.allow entries from .claude/settings.json:
+ *   this workspace has not been trusted.
+ *
+ * The gating is narrow, and the boundaries were each verified separately
+ * because getting them wrong is dangerous in both directions:
+ *
+ *   - project-layer `allow`  — GATED (ignored until trusted)
+ *   - user-layer `allow`     — not gated
+ *   - `deny` and `ask`       — not gated, at any layer
+ *
+ * That asymmetry is security-correct: dropping an `allow` falls back to
+ * prompting, whereas dropping a `deny` would silently remove a guard.
+ */
+export interface WorkspaceTrust {
+  /** `undefined` when we could not read the trust store at all. */
+  trusted: boolean | undefined;
+  /** The `~/.claude.json` projects key that matched, for reporting. */
+  matchedKey?: string;
+}
+
 export interface Discovery {
   projectRoot: string;
+  workspaceTrust: WorkspaceTrust;
   /**
    * How the root was chosen. Reporting this is not cosmetic: a wrong root makes
    * every downstream number wrong in a way that still looks self-consistent, so
@@ -236,6 +264,7 @@ export function discover(options: DiscoveryOptions = {}): Discovery {
 
   return {
     projectRoot,
+    workspaceTrust: readWorkspaceTrust(home, projectRoot),
     rootProvenance,
     startedFrom: cwd,
     home,
@@ -286,6 +315,57 @@ function findSubdirectoryMemory(root: string, maxDepth = 4): string[] {
   };
   walk(root, 1);
   return found;
+}
+
+/**
+ * Read the workspace trust flag from `~/.claude.json`.
+ *
+ * Key matching is case- and separator-insensitive on purpose: a real store
+ * contains BOTH `d:/internship/...` and `D:/internship/...` as distinct keys
+ * for the same directory, so an exact string compare would report a trusted
+ * workspace as untrusted roughly half the time.
+ */
+export function readWorkspaceTrust(home: string, projectRoot: string): WorkspaceTrust {
+  const store = join(home, ".claude.json");
+
+  // No store at all means no workspace has ever been trusted, which is a
+  // definite `false` — and matches the binary, which ignores project allow
+  // entries in exactly this situation. Only an unreadable or malformed store is
+  // genuinely unknown; guessing there would risk telling someone their
+  // permissions are being ignored when we simply could not tell.
+  if (!isFile(store)) return { trusted: false };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(store, "utf8"));
+  } catch {
+    return { trusted: undefined };
+  }
+
+  const projects =
+    typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)["projects"]
+      : undefined;
+
+  // A store with no projects map is well-formed and simply records no trusted
+  // workspaces.
+  if (typeof projects !== "object" || projects === null) return { trusted: false };
+
+  const want = normalizeProjectKey(projectRoot);
+  for (const [key, value] of Object.entries(projects as Record<string, unknown>)) {
+    if (normalizeProjectKey(key) !== want) continue;
+    if (typeof value !== "object" || value === null) continue;
+    const flag = (value as Record<string, unknown>)["hasTrustDialogAccepted"];
+    if (typeof flag === "boolean") return { trusted: flag, matchedKey: key };
+  }
+
+  // A project with no entry has never been opened interactively, so it has not
+  // been trusted. That is a definite `false`, not an unknown.
+  return { trusted: false };
+}
+
+function normalizeProjectKey(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
 export function isFile(p: string): boolean {

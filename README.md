@@ -67,6 +67,12 @@ Deterministic findings only, by default. `--strict` adds heuristic ones.
 - **mcp** — malformed server entries, unknown transports, unparseable URLs,
   duplicate server names across scopes, unset `$VAR` references
 - **settings** — values overridden by a higher-precedence layer, unrecognised keys
+- **permissions** — entries already covered by a broader wildcard, exact
+  duplicates, paths that cannot exist, and — the one people are most surprised
+  by — **project-level `allow` entries that Claude Code is ignoring entirely
+  because the workspace has not been trusted**. That gating is narrow and each
+  boundary is pinned by a conformance fixture: only `allow`, only from a project
+  layer. `deny`, `ask`, and your own user-level `allow` keep working.
 - **memory** — dead `@imports`, import cycles, rules duplicated within a file or
   across two files that are both always in context
 

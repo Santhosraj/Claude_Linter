@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { recordDoctorOracle, recordHookOracle, recordOracle } from "./oracle.js";
+import { recordDoctorOracle, recordHookOracle, recordOracle, recordTrustOracle } from "./oracle.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesRoot = resolve(here, "..", "test", "fixtures");
@@ -110,6 +110,14 @@ function main(): number {
           process.stdout.write(
             `ok (claude ${result.claudeVersion}, ${result.validHookEvents.length} valid hook events, ` +
               `${result.complaints.length} complaint(s))\n`,
+          );
+        } else if (oracle === "trust") {
+          const result = recordTrustOracle(dir, fakeHome);
+          write(dir, "trust.json", result);
+          process.stdout.write(
+            `ok (claude ${result.claudeVersion}, ignored: ` +
+              result.ignoredAllow.map((i) => `${i.count} in ${i.file}`).join("; ") +
+              ")\n",
           );
         } else if (oracle === "hooks") {
           const result = recordHookOracle(dir, fakeHome, spec.event ?? "UserPromptSubmit");

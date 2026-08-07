@@ -101,6 +101,7 @@ const DESCRIPTIONS: Record<string, string> = {
   "mcp/duplicate-server": "MCP server name is defined in more than one scope.",
   "mcp/command-not-on-path": "MCP server binary was not found on PATH.",
   "mcp/unset-env-var": "MCP config references an environment variable that is unset.",
+  "permissions/untrusted-workspace": "Project-level permissions.allow entries are ignored because the workspace is not trusted.",
   "permissions/duplicate-entry": "The same permission entry is listed more than once.",
   "permissions/redundant-entry": "A permission entry is already covered by a broader rule.",
   "permissions/dead-path": "A permission entry points at a path that does not exist on this machine.",

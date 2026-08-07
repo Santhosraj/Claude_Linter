@@ -410,6 +410,70 @@ function toRelative(projectDir: string, file: string): string {
   return f.startsWith(root) ? f.slice(root.length).replace(/^\/+/, "") : f;
 }
 
+/**
+ * Result of the workspace-trust oracle.
+ *
+ * `claude --debug` announces, before any network call, which permission entries
+ * it is dropping because the workspace has not been trusted:
+ *
+ *   Ignoring 2 permissions.allow entries from .claude/settings.json:
+ *   this workspace has not been trusted.
+ *
+ * The count and the file name are the whole signal, and they are what pins the
+ * gating boundaries: a fixture that also carries `deny`, `ask` and a user-level
+ * `allow` proves those are NOT gated, because they are absent from the count.
+ */
+export interface TrustOracleResult {
+  claudeVersion: string;
+  /** Per-file counts of ignored `permissions.allow` entries. */
+  ignoredAllow: { file: string; count: number }[];
+}
+
+export function recordTrustOracle(
+  projectDir: string,
+  fakeHome: string,
+): TrustOracleResult {
+  let raw: string;
+  try {
+    raw = execFileSync("claude", ["--debug", "-p", "conformance-probe"], {
+      cwd: projectDir,
+      encoding: "utf8",
+      env: sandboxEnv(fakeHome),
+      timeout: 120_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const e = error as { stdout?: string; stderr?: string };
+    raw = `${e.stdout ?? ""}\n${e.stderr ?? ""}`;
+  }
+
+  const output = stripAnsi(raw);
+  const ignoredAllow = parseIgnoredAllow(output);
+
+  if (ignoredAllow.length === 0) {
+    throw new Error(
+      "Trust oracle saw no `Ignoring ... permissions.allow` line. The fixture " +
+        "must declare project-level allow entries AND leave the workspace " +
+        "untrusted (no matching key in the fake home's .claude.json).\n\n" +
+        `Raw output:\n${output.slice(0, 1000)}`,
+    );
+  }
+
+  return { claudeVersion: claudeVersion(), ignoredAllow };
+}
+
+export function parseIgnoredAllow(output: string): { file: string; count: number }[] {
+  const out: { file: string; count: number }[] = [];
+  const re = /Ignoring (\d+) permissions\.allow (?:entry|entries) from ([^:]+):/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(output)) !== null) {
+    const count = Number(m[1]);
+    const file = (m[2] ?? "").trim().split("\\").join("/");
+    if (Number.isFinite(count) && file) out.push({ file, count });
+  }
+  return out;
+}
+
 export function recordOracle(projectDir: string, fakeHome: string): OracleResult {
   const output = runMcpList(projectDir, fakeHome);
   const servers = parseMcpList(output);

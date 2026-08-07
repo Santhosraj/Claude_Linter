@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import { analyze } from "../src/analyze.js";
 import { KNOWN_EVENTS } from "../src/rules/hooks.js";
-import type { DoctorOracleResult, HookOracleResult, OracleResult } from "../scripts/oracle.js";
+import type {
+  DoctorOracleResult,
+  HookOracleResult,
+  OracleResult,
+  TrustOracleResult,
+} from "../scripts/oracle.js";
 
 /**
  * Differential conformance tests.
@@ -44,9 +49,106 @@ function doctorFixtures(): string[] {
   );
 }
 
+function trustFixtures(): string[] {
+  if (!existsSync(fixturesRoot)) return [];
+  return readdirSync(fixturesRoot).filter((name) =>
+    existsSync(join(fixturesRoot, name, ".conformance", "trust.json")),
+  );
+}
+
 const fixtures = recordedFixtures();
 const hooks = hookFixtures();
 const doctors = doctorFixtures();
+const trusts = trustFixtures();
+
+/**
+ * Workspace-trust conformance.
+ *
+ * Project-level `permissions.allow` entries are ignored until the workspace is
+ * trusted — a whole gating mechanism cclint originally knew nothing about, so it
+ * reported 33 entries in a real repo as live when Claude Code was discarding
+ * every one of them.
+ *
+ * The fixture is built so the recorded COUNT proves the boundaries by itself:
+ * it declares 2 project allow entries, 1 deny, 1 ask, and 3 user-level allow
+ * entries. A recording of exactly 2 is only possible if `deny`, `ask` and the
+ * user's own allow list are all ungated.
+ */
+describe.skipIf(trusts.length === 0)("workspace-trust conformance", () => {
+  for (const name of trusts) {
+    const dir = join(fixturesRoot, name);
+    const recorded = JSON.parse(
+      readFileSync(join(dir, ".conformance", "trust.json"), "utf8"),
+    ) as TrustOracleResult;
+
+    describe(name, () => {
+      it("reports the same ignored-entry count as the binary, per file", async () => {
+        const result = await analyze({
+          cwd: dir,
+          home: join(dir, ".fake-home"),
+          managedPolicyPath: join(dir, "__no_such_policy__.json"),
+          skipBudget: true,
+        });
+
+        const ours = result.diagnostics.filter(
+          (d) => d.ruleId === "permissions/untrusted-workspace",
+        );
+
+        const mismatches: string[] = [];
+        for (const expected of recorded.ignoredAllow) {
+          const match = ours.find((d) =>
+            d.file.split("\\").join("/").endsWith(expected.file),
+          );
+          if (!match) {
+            mismatches.push(`${expected.file}: binary ignores ${expected.count}, cclint said nothing`);
+            continue;
+          }
+          if (match.data?.["count"] !== expected.count) {
+            mismatches.push(
+              `${expected.file}: binary ignores ${expected.count}, cclint said ${String(match.data?.["count"])}`,
+            );
+          }
+        }
+        expect(mismatches).toEqual([]);
+      });
+
+      it("does not invent trust findings the binary never reported", async () => {
+        const result = await analyze({
+          cwd: dir,
+          home: join(dir, ".fake-home"),
+          managedPolicyPath: join(dir, "__no_such_policy__.json"),
+          skipBudget: true,
+        });
+
+        const ours = result.diagnostics.filter(
+          (d) => d.ruleId === "permissions/untrusted-workspace",
+        );
+        expect(ours.length).toBe(recorded.ignoredAllow.length);
+      });
+
+      it("records a count that proves deny, ask and user-allow are ungated", () => {
+        // Guards the fixture itself: if someone simplifies it down to a bare
+        // allow list, the recording still passes but stops proving anything.
+        const total = recorded.ignoredAllow.reduce((n, i) => n + i.count, 0);
+        expect(total).toBeGreaterThan(0);
+
+        const settings = JSON.parse(
+          readFileSync(join(dir, ".claude", "settings.json"), "utf8"),
+        ) as { permissions: Record<string, string[]> };
+        const userSettings = JSON.parse(
+          readFileSync(join(dir, ".fake-home", ".claude", "settings.json"), "utf8"),
+        ) as { permissions: Record<string, string[]> };
+
+        expect(settings.permissions["deny"]?.length ?? 0).toBeGreaterThan(0);
+        expect(settings.permissions["ask"]?.length ?? 0).toBeGreaterThan(0);
+        expect(userSettings.permissions["allow"]?.length ?? 0).toBeGreaterThan(0);
+
+        // The count must equal ONLY the project allow entries.
+        expect(total).toBe(settings.permissions["allow"]?.length ?? 0);
+      });
+    });
+  }
+});
 
 /**
  * `claude doctor` conformance.

@@ -15,13 +15,17 @@ import type { Diagnostic } from "../src/model/types.js";
  * four broad wildcards. cclint previously reported that file as clean.
  */
 
-function ctxFor(files: { file: string; layer: "user" | "projectShared" | "projectLocal"; json: unknown }[]): RuleContext {
+function ctxFor(
+  files: { file: string; layer: "user" | "projectShared" | "projectLocal"; json: unknown }[],
+  trusted: boolean | undefined = true,
+): RuleContext {
   const resolution = resolveSettings(
     files.map((f) => ({ file: f.file, layer: f.layer, text: JSON.stringify(f.json, null, 2) })),
   );
   return {
     discovery: {
       projectRoot: "/proj",
+      workspaceTrust: { trusted },
       rootProvenance: { root: "/proj", source: "forced" },
       startedFrom: "/proj",
       home: "/home",
@@ -39,7 +43,8 @@ function ctxFor(files: { file: string; layer: "user" | "projectShared" | "projec
 
 const run = (
   files: Parameters<typeof ctxFor>[0],
-): Diagnostic[] => permissionRules(ctxFor(files));
+  trusted: boolean | undefined = true,
+): Diagnostic[] => permissionRules(ctxFor(files, trusted));
 
 describe("subsumption", () => {
   it("treats `cmd:*` as a prefix grant", () => {
@@ -174,6 +179,82 @@ describe("rules end to end", () => {
     expect(out.filter((d) => d.ruleId === "permissions/dead-path")).toEqual([]);
   });
 
+  it("reports project allow entries as ignored in an untrusted workspace", () => {
+    const out = run(
+      [
+        {
+          file: "/proj/.claude/settings.json",
+          layer: "projectShared",
+          json: { permissions: { allow: ["Bash(ls:*)", "Bash(echo:*)"] } },
+        },
+      ],
+      false,
+    );
+    const trust = out.filter((d) => d.ruleId === "permissions/untrusted-workspace");
+    expect(trust).toHaveLength(1);
+    expect(trust[0]?.data?.["count"]).toBe(2);
+  });
+
+  it("does NOT claim deny or ask are ignored when untrusted", () => {
+    // Verified against the binary: only project-layer `allow` is gated. Saying
+    // a `deny` is being ignored would tell someone a security guard is off when
+    // it is not — the most damaging direction to be wrong in.
+    const out = run(
+      [
+        {
+          file: "/proj/.claude/settings.json",
+          layer: "projectShared",
+          json: { permissions: { deny: ["Bash(rm:*)"], ask: ["Bash(git push:*)"] } },
+        },
+      ],
+      false,
+    );
+    expect(out.filter((d) => d.ruleId === "permissions/untrusted-workspace")).toEqual([]);
+  });
+
+  it("does NOT gate the user's own allow list", () => {
+    const out = run(
+      [
+        {
+          file: "/home/.claude/settings.json",
+          layer: "user",
+          json: { permissions: { allow: ["Bash(whoami:*)"] } },
+        },
+      ],
+      false,
+    );
+    expect(out.filter((d) => d.ruleId === "permissions/untrusted-workspace")).toEqual([]);
+  });
+
+  it("suppresses other findings for entries that are being ignored", () => {
+    // One actionable finding beats thirteen about config that is not in effect.
+    const out = run(
+      [
+        {
+          file: "/proj/.claude/settings.json",
+          layer: "projectShared",
+          json: { permissions: { allow: ["Bash(curl -s x)", "Bash(curl:*)"] } },
+        },
+      ],
+      false,
+    );
+    expect(out.map((d) => d.ruleId)).toEqual(["permissions/untrusted-workspace"]);
+  });
+
+  it("says nothing about trust when it cannot determine the state", () => {
+    const out = run(
+      [
+        {
+          file: "/proj/.claude/settings.json",
+          layer: "projectShared",
+          json: { permissions: { allow: ["Bash(ls:*)"] } },
+        },
+      ],
+      undefined,
+    );
+    expect(out.filter((d) => d.ruleId === "permissions/untrusted-workspace")).toEqual([]);
+  });
+
   it("ignores permissions in a file Claude Code would discard", () => {
     // A settings file with a comment is thrown away wholesale, so its entries
     // are not in effect and reporting on them would be noise about dead config
@@ -188,6 +269,7 @@ describe("rules end to end", () => {
     const out = permissionRules({
       discovery: {
         projectRoot: "/proj",
+        workspaceTrust: { trusted: true },
         rootProvenance: { root: "/proj", source: "forced" },
         startedFrom: "/proj",
         home: "/home",

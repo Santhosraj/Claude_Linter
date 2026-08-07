@@ -1,0 +1,9 @@
+{
+  "claudeVersion": "2.1.224",
+  "ignoredAllow": [
+    {
+      "file": ".claude/settings.json",
+      "count": 2
+    }
+  ]
+}

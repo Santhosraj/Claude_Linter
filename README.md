@@ -234,7 +234,8 @@ capped** rather than reading as complete coverage.
 ## GitHub Action
 
 ```yaml
-- uses: Santhosraj/Claude_Linter@v1
+# Pin to a release tag once one exists; `@main` always resolves.
+- uses: Santhosraj/Claude_Linter@main
   with:
     fail-on: error
     # Optional. Without it the action still runs fully; token figures

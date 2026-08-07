@@ -58,6 +58,10 @@ twice.
 
 Deterministic findings only, by default. `--strict` adds heuristic ones.
 
+- **json** — comments and trailing commas. Claude Code parses settings as
+  **strict** JSON: one `//` invalidates the entire file and every setting in it
+  silently stops applying. cclint reports it as an error and excludes the file
+  from resolution, exactly as Claude Code does.
 - **hooks** — unknown events (a hook that can never fire), malformed schemas,
   scripts that don't exist, commands not on `PATH`, matchers naming no known tool
 - **mcp** — malformed server entries, unknown transports, unparseable URLs,
@@ -114,9 +118,19 @@ Prints discovered layers plus the merge-rule confidence breakdown (below).
 A linter is only as trustworthy as its model of the thing it's linting, so that
 model is tested rather than assumed.
 
-**Differential conformance testing.** Two oracles interrogate the real Claude
-Code binary, and **neither makes an API call** — so recording is free and CI can
+**Differential conformance testing.** Three oracles interrogate the real Claude
+Code binary, and **none makes an API call** — so recording is free and CI can
 replay on every commit.
+
+*Doctor.* `claude doctor` reads a directory's settings files without a trust
+prompt and reports everything it rejected — unknown hook events, malformed JSON,
+skipped MCP servers — and, when it rejects an event, prints the complete list of
+valid ones. That list is recorded, and a test asserts cclint's own list matches
+it exactly. Adopting this oracle immediately exposed three live bugs: a
+hand-written event list with **9 entries against the real 31** (so 22 valid
+events were being reported as "this hook will never fire"), an MCP transport list
+missing `ws` / `sdk` / `streamable-http`, and silent tolerance of JSON comments
+that Claude Code rejects outright.
 
 *MCP.* `claude mcp list` resolves the same layered config the runtime uses and
 reports which servers it accepted and which it skipped. The suite asserts

@@ -4,11 +4,11 @@
   "description": "Lint CLAUDE.md, hooks, and MCP config for silent conflicts, dead references, and token bloat.",
   "type": "module",
   "bin": {
-    "cclint": "./dist/cli.js"
+    "cclint": "./dist/cli.js",
+    "claude-config-lint": "./dist/cli.js"
   },
   "files": [
-    "dist",
-    "data"
+    "dist"
   ],
   "engines": {
     "node": ">=20"
@@ -32,5 +32,19 @@
     "typescript": "^5.7.2",
     "vitest": "^4.1.10"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/claude-config-lint.git"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "lint",
+    "linter",
+    "CLAUDE.md",
+    "hooks",
+    "mcp",
+    "config"
+  ]
 }

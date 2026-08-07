@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { recordHookOracle, recordOracle } from "./oracle.js";
+import { recordDoctorOracle, recordHookOracle, recordOracle } from "./oracle.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesRoot = resolve(here, "..", "test", "fixtures");
@@ -29,14 +29,29 @@ interface OracleSpec {
 }
 
 /**
- * Running an oracle makes the real binary write its own state into the
- * fixture's sandboxed home — including a machineID and userID. Those are
- * gitignored, but we also delete them after each recording so a fixture
- * directory never sits around holding machine-identifying values.
+ * Files a fixture's fake home is allowed to contain. Everything else under
+ * `.claude/` is state the binary wrote and must not be committed.
+ */
+const FAKE_HOME_KEEP = new Set(["settings.json", "settings.local.json", "CLAUDE.md"]);
+
+/**
+ * Scrub everything the real binary wrote into the fixture's sandboxed home.
+ *
+ * This is an ALLOWLIST on purpose. The previous version deleted a hardcoded set
+ * (`.claude.json`, `backups/`, `statsig/`) and promptly missed `projects/`,
+ * which accumulates a session transcript per probe — one more untracked file
+ * every time anyone records. A blocklist will always lag the binary; an
+ * allowlist cannot.
  */
 function cleanFakeHome(fakeHome: string): void {
-  for (const relPath of [".claude.json", ".claude/backups", ".claude/statsig"]) {
-    rmSync(join(fakeHome, relPath), { recursive: true, force: true });
+  rmSync(join(fakeHome, ".claude.json"), { force: true });
+
+  const claudeDir = join(fakeHome, ".claude");
+  if (!existsSync(claudeDir)) return;
+
+  for (const entry of readdirSync(claudeDir)) {
+    if (FAKE_HOME_KEEP.has(entry)) continue;
+    rmSync(join(claudeDir, entry), { recursive: true, force: true });
   }
 }
 
@@ -88,6 +103,13 @@ function main(): number {
           ).length;
           process.stdout.write(
             `ok (claude ${result.claudeVersion}, ${Object.keys(result.servers).length} servers, ${skipped} skipped)\n`,
+          );
+        } else if (oracle === "doctor") {
+          const result = recordDoctorOracle(dir, fakeHome);
+          write(dir, "doctor.json", result);
+          process.stdout.write(
+            `ok (claude ${result.claudeVersion}, ${result.validHookEvents.length} valid hook events, ` +
+              `${result.complaints.length} complaint(s))\n`,
           );
         } else if (oracle === "hooks") {
           const result = recordHookOracle(dir, fakeHome, spec.event ?? "UserPromptSubmit");

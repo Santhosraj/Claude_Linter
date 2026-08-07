@@ -1,0 +1,61 @@
+{
+  "claudeVersion": "2.1.224",
+  "validHookEvents": [
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PostToolBatch",
+    "Notification",
+    "UserPromptSubmit",
+    "UserPromptExpansion",
+    "SessionStart",
+    "SessionEnd",
+    "Stop",
+    "StopFailure",
+    "SubagentStart",
+    "SubagentStop",
+    "PreCompact",
+    "PostCompact",
+    "PermissionRequest",
+    "PermissionDenied",
+    "Setup",
+    "TeammateIdle",
+    "TaskCreated",
+    "TaskCompleted",
+    "Elicitation",
+    "ElicitationResult",
+    "ConfigChange",
+    "WorktreeCreate",
+    "WorktreeRemove",
+    "InstructionsLoaded",
+    "CwdChanged",
+    "FileChanged",
+    "DirectoryAdded",
+    "MessageDisplay"
+  ],
+  "complaints": [
+    {
+      "file": ".claude/settings.json",
+      "pointer": "hooks.OnFileSave",
+      "message": "Unknown hook event \"OnFileSave\" was ignored. Valid events: PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, Notification, UserPromptSubmit, UserPromptExpansion, SessionStart, SessionEnd, Stop, StopFailure, SubagentStart, SubagentStop, PreCompact, PostCompact, PermissionRequest, PermissionDenied, Setup, TeammateIdle, TaskCreated, TaskCompleted, Elicitation, ElicitationResult, ConfigChange, WorktreeCreate, WorktreeRemove, InstructionsLoaded, CwdChanged, FileChanged, DirectoryAdded, MessageDisplay",
+      "kind": "unknown-hook-event"
+    },
+    {
+      "file": ".claude/settings.local.json",
+      "message": "Invalid or malformed JSON",
+      "kind": "malformed-json"
+    },
+    {
+      "file": ".mcp.json",
+      "pointer": "mcpServers.broken-transport",
+      "message": "Skipped — unknown MCP server type \"websocket\" for server \"broken-transport\"",
+      "kind": "mcp-skipped"
+    },
+    {
+      "file": ".mcp.json",
+      "pointer": "mcpServers.missing-target",
+      "message": "Skipped — invalid MCP server config for \"missing-target\": command: expected string, received undefined",
+      "kind": "mcp-skipped"
+    }
+  ]
+}

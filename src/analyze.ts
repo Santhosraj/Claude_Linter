@@ -10,6 +10,7 @@ import { parseAxes, BUILTIN_AXES, type Axis } from "./rules/axes.js";
 import { hookRules } from "./rules/hooks.js";
 import { mcpRules } from "./rules/mcp.js";
 import { memoryRules } from "./rules/memory.js";
+import { permissionRules } from "./rules/permissions.js";
 import { settingsRules } from "./rules/settings.js";
 import { resolveSettings, type LayerInput } from "./resolve/settings.js";
 import { scanMarkdown, toRules } from "./parse/markdown.js";
@@ -192,6 +193,7 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
     ...settingsRules(ctx),
     ...hookRules(ctx),
     ...mcpRules(ctx),
+    ...permissionRules(ctx),
     ...memoryRules(ctx, axes),
   ];
 

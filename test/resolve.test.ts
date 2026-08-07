@@ -138,7 +138,11 @@ describe("robustness", () => {
     expect(byPath(keys, "model").effective).toBe("opus");
   });
 
-  it("tolerates comments and trailing commas", () => {
+  it("reports comments and trailing commas as errors, because Claude Code discards the file", () => {
+    // This test previously asserted the OPPOSITE — that JSON extensions were
+    // tolerated silently. That was a bug, not a feature: `claude doctor`
+    // rejects both with "Invalid or malformed JSON" and drops the entire file,
+    // so staying quiet meant reporting dead settings as live.
     const { keys, diagnostics } = resolveSettings([
       {
         file: "/fake/local.json",
@@ -149,8 +153,45 @@ describe("robustness", () => {
 }`,
       },
     ]);
+
+    const strict = diagnostics.filter((d) => d.ruleId === "json/not-strict-json");
+    expect(strict.length).toBeGreaterThan(0);
+    expect(strict.every((d) => d.severity === "error")).toBe(true);
+
+    // The comment is on line 2 and the trailing comma on line 3; findings must
+    // point at the offending characters, not at the file as a whole.
+    expect(strict.map((d) => d.position?.line).sort()).toEqual([2, 3]);
+
+    // And the file contributes NOTHING to resolution, because Claude Code
+    // discards it. Resolving its values anyway would make cclint describe a
+    // configuration that is not in effect.
+    expect(keys.find((k) => k.path === "model")).toBeUndefined();
+  });
+
+  it("does not report a discarded file as overriding a valid one", () => {
+    // The second-order trap: a local layer with one comment is dead, so it
+    // cannot shadow the project layer. Reporting otherwise would send someone
+    // hunting for an override that does not exist.
+    const { keys } = resolveSettings([
+      { file: "/fake/project.json", layer: "projectShared", text: '{"model":"sonnet"}' },
+      {
+        file: "/fake/local.json",
+        layer: "projectLocal",
+        text: '{\n  // dead file\n  "model":"opus"\n}',
+      },
+    ]);
+
+    const model = byPath(keys, "model");
+    expect(model.effective).toBe("sonnet");
+    expect(model.contributions).toHaveLength(1);
+    expect(model.shadowed).toEqual([]);
+  });
+
+  it("stays silent on strict JSON", () => {
+    const { diagnostics } = resolveSettings([
+      { file: "/fake/ok.json", layer: "user", text: '{\n  "model": "opus"\n}' },
+    ]);
     expect(diagnostics).toEqual([]);
-    expect(byPath(keys, "model").effective).toBe("opus");
   });
 
   it("attaches a real source position to each contribution", () => {

@@ -1,10 +1,19 @@
 /**
- * Position-preserving JSON(C) parsing.
+ * Position-preserving JSON parsing.
  *
- * We deliberately do NOT use JSON.parse: it discards positions (so findings
- * can't be anchored to a line, and GitHub Action annotations are impossible)
- * and it rejects comments and trailing commas, which people genuinely do put
- * in settings.local.json and .mcp.json.
+ * We parse leniently so that ONE syntax mistake does not blind every other rule
+ * — and because `JSON.parse` discards positions, which would make findings
+ * unanchorable and CI annotations impossible.
+ *
+ * But leniency must not become tolerance. Claude Code parses its settings files
+ * as STRICT JSON: a single `//` comment or trailing comma makes it discard the
+ * entire file, silently, taking every setting in it with it. Verified against
+ * `claude doctor` on 2.1.224, which reports "Invalid or malformed JSON" for
+ * both.
+ *
+ * So we read the file leniently and then report the extensions as an error.
+ * Staying quiet here would be the worst possible outcome: cclint would parse a
+ * file Claude Code has thrown away and cheerfully report its settings as live.
  */
 
 import {
@@ -50,7 +59,99 @@ export function parseJsonFile(file: string, text: string): ParsedJson {
     position: offsetToPosition(lineStarts, e.offset, e.length),
   }));
 
+  // Only worth checking if the file otherwise parsed — a file that is already
+  // broken does not need a second opinion about why.
+  if (parseErrors.length === 0) {
+    errors.push(...strictJsonViolations(file, text, lineStarts));
+  }
+
   return { file, text, value, root, errors, lineStarts };
+}
+
+/**
+ * Report JSON extensions that Claude Code rejects outright.
+ *
+ * Each extension gets its own parse with only that tolerance disabled, so the
+ * error set is unambiguously attributable. The obvious alternative — one strict
+ * parse, then classifying by error name — does not work: jsonc-parser reports a
+ * trailing comma as `PropertyNameExpected` / `ValueExpected`, names that say
+ * nothing about commas, so a name-matching version silently missed every
+ * trailing comma while appearing to work.
+ */
+function strictJsonViolations(
+  file: string,
+  text: string,
+  lineStarts: number[],
+): Diagnostic[] {
+  const detail = [
+    "Claude Code parses settings as strict JSON. One comment or trailing comma " +
+      "invalidates the entire file, so every setting in it silently stops applying.",
+    "`claude doctor` reports this as: Invalid or malformed JSON.",
+  ];
+
+  const out: Diagnostic[] = [];
+  const seen = new Set<string>();
+
+  const collect = (
+    options: { allowTrailingComma: boolean; disallowComments: boolean },
+    message: string,
+    anchorToPrecedingComma = false,
+  ) => {
+    const errors: ParseError[] = [];
+    parseJsonc(text, errors, options);
+    for (const e of errors) {
+      // The parser reports a trailing comma where it NOTICED the problem — at
+      // the closing brace — not where the comma is. Point at the character the
+      // user has to delete instead.
+      const offset = anchorToPrecedingComma ? precedingComma(text, e.offset) : e.offset;
+      const key = `${message}:${offset}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        ruleId: "json/not-strict-json",
+        severity: "error",
+        message,
+        file,
+        position: offsetToPosition(lineStarts, offset, anchorToPrecedingComma ? 1 : e.length),
+        detail,
+      });
+    }
+  };
+
+  collect(
+    { allowTrailingComma: true, disallowComments: true },
+    "Comments are not allowed here — Claude Code discards the whole file.",
+  );
+  collect(
+    { allowTrailingComma: false, disallowComments: false },
+    "Trailing comma is not allowed here — Claude Code discards the whole file.",
+    true,
+  );
+
+  // A trailing comma yields several errors at one offset; keep one per position.
+  return dedupeByPosition(out);
+}
+
+/**
+ * Walk backwards from `offset` over whitespace to the comma that caused the
+ * error. Falls back to the original offset when there is no comma there, so a
+ * surprising parse shape degrades to a slightly-off position rather than a
+ * wrong one.
+ */
+function precedingComma(text: string, offset: number): number {
+  let i = Math.min(offset, text.length) - 1;
+  while (i >= 0 && /\s/.test(text[i] ?? "")) i--;
+  return i >= 0 && text[i] === "," ? i : offset;
+}
+
+function dedupeByPosition(diagnostics: Diagnostic[]): Diagnostic[] {
+  const seen = new Set<string>();
+  return diagnostics.filter((d) => {
+    const key = `${d.position?.line}:${d.position?.column}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**

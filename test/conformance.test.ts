@@ -3,7 +3,8 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { analyze } from "../src/analyze.js";
-import type { HookOracleResult, OracleResult } from "../scripts/oracle.js";
+import { KNOWN_EVENTS } from "../src/rules/hooks.js";
+import type { DoctorOracleResult, HookOracleResult, OracleResult } from "../scripts/oracle.js";
 
 /**
  * Differential conformance tests.
@@ -36,8 +37,136 @@ function hookFixtures(): string[] {
   );
 }
 
+function doctorFixtures(): string[] {
+  if (!existsSync(fixturesRoot)) return [];
+  return readdirSync(fixturesRoot).filter((name) =>
+    existsSync(join(fixturesRoot, name, ".conformance", "doctor.json")),
+  );
+}
+
 const fixtures = recordedFixtures();
 const hooks = hookFixtures();
+const doctors = doctorFixtures();
+
+/**
+ * `claude doctor` conformance.
+ *
+ * This is the broadest oracle: it validates hook events, JSON syntax, and MCP
+ * entries in one pass, without an API call. Adopting it immediately exposed
+ * three live bugs — a hand-written hook-event list with 9 entries against the
+ * real 31, an MCP transport list missing three valid types, and silent
+ * tolerance of JSON comments that Claude Code rejects outright.
+ *
+ * The event-list assertion below is the highest-value test in the suite: it
+ * turns "our list has silently gone stale" from an invisible source of false
+ * positives into a failing test the next time Claude Code adds an event.
+ */
+describe.skipIf(doctors.length === 0)("doctor conformance", () => {
+  for (const name of doctors) {
+    const dir = join(fixturesRoot, name);
+    const recorded = JSON.parse(
+      readFileSync(join(dir, ".conformance", "doctor.json"), "utf8"),
+    ) as DoctorOracleResult;
+
+    describe(name, () => {
+      it("KNOWN_EVENTS matches the binary's own valid-event list exactly", () => {
+        const ours = [...KNOWN_EVENTS].sort();
+        const theirs = [...recorded.validHookEvents].sort();
+
+        const weInvented = ours.filter((e) => !theirs.includes(e));
+        const weMissed = theirs.filter((e) => !ours.includes(e));
+
+        // Missing events are the dangerous direction: each one makes cclint
+        // report a working hook as "this will never fire".
+        expect(
+          { weMissed, weInvented },
+          "cclint's hook-event list has drifted from Claude Code's",
+        ).toEqual({ weMissed: [], weInvented: [] });
+      });
+
+      it("reports an error for every file the binary rejected as malformed JSON", async () => {
+        const result = await analyze({
+          cwd: dir,
+          home: join(dir, ".fake-home"),
+          managedPolicyPath: join(dir, "__no_such_policy__.json"),
+          skipBudget: true,
+        });
+
+        const missed: string[] = [];
+        for (const c of recorded.complaints.filter((x) => x.kind === "malformed-json")) {
+          const ours = result.diagnostics.filter(
+            (d) =>
+              (d.ruleId === "json/not-strict-json" || d.ruleId === "json/parse-error") &&
+              d.file.split("\\").join("/").endsWith(c.file),
+          );
+          if (ours.length === 0) {
+            missed.push(`${c.file}: Claude Code rejects this file, cclint did not`);
+          }
+        }
+        expect(missed).toEqual([]);
+      });
+
+      it("reports an error for every hook event the binary rejected", async () => {
+        const result = await analyze({
+          cwd: dir,
+          home: join(dir, ".fake-home"),
+          managedPolicyPath: join(dir, "__no_such_policy__.json"),
+          skipBudget: true,
+        });
+
+        const missed: string[] = [];
+        for (const c of recorded.complaints.filter(
+          (x) => x.kind === "unknown-hook-event",
+        )) {
+          const event = /Unknown hook event "([^"]+)"/.exec(c.message)?.[1];
+          if (!event) continue;
+          const ours = result.diagnostics.filter(
+            (d) => d.ruleId === "hooks/unknown-event" && d.data?.["event"] === event,
+          );
+          if (ours.length === 0) missed.push(event);
+        }
+        expect(missed).toEqual([]);
+      });
+
+      it("flags every malformed hook the binary rejected, at the same pointer", async () => {
+        // The strictest assertion in the suite. `claude doctor` names the exact
+        // config pointer it rejected (`hooks.PreToolUse.0.hooks.0.command`), and
+        // our diagnostics carry the same pointer shape — so this compares
+        // findings position-for-position, not just file-for-file.
+        const result = await analyze({
+          cwd: dir,
+          home: join(dir, ".fake-home"),
+          managedPolicyPath: join(dir, "__no_such_policy__.json"),
+          skipBudget: true,
+        });
+
+        const oursByPointer = new Set(
+          result.diagnostics
+            .filter((d) => d.ruleId === "hooks/malformed")
+            .map((d) => d.data?.["pointer"])
+            .filter((p): p is string => typeof p === "string"),
+        );
+
+        const missed = recorded.complaints
+          .filter((c) => c.kind === "hook-schema" && c.pointer)
+          .map((c) => c.pointer!)
+          .filter((pointer) => !oursByPointer.has(pointer));
+
+        expect(
+          missed,
+          "Claude Code rejects these hook entries; cclint did not flag them",
+        ).toEqual([]);
+      });
+
+      it("does not flag any event the binary accepts", async () => {
+        // The false-positive direction. Build a settings object using every
+        // valid event and assert cclint stays silent about all of them.
+        const flagged = recorded.validHookEvents.filter((e) => !KNOWN_EVENTS.has(e));
+        expect(flagged, "these valid events would be reported as unknown").toEqual([]);
+      });
+    });
+  }
+});
 
 /**
  * Hook conformance — the tool's headline claim, proven rather than assumed.

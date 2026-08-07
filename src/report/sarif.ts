@@ -86,6 +86,8 @@ function defaultSeverityFor(diagnostics: Diagnostic[], ruleId: string): Severity
 
 const DESCRIPTIONS: Record<string, string> = {
   "json/parse-error": "Config file is not valid JSON.",
+  "json/not-strict-json":
+    "Config file uses JSON extensions (comments or trailing commas) that Claude Code rejects, discarding the whole file.",
   "settings/shadowed-key": "A settings value is overridden by a higher-precedence layer.",
   "settings/unknown-key": "Unrecognised settings key.",
   "hooks/unknown-event": "Hook registered for an event that does not exist.",
@@ -99,6 +101,9 @@ const DESCRIPTIONS: Record<string, string> = {
   "mcp/duplicate-server": "MCP server name is defined in more than one scope.",
   "mcp/command-not-on-path": "MCP server binary was not found on PATH.",
   "mcp/unset-env-var": "MCP config references an environment variable that is unset.",
+  "permissions/duplicate-entry": "The same permission entry is listed more than once.",
+  "permissions/redundant-entry": "A permission entry is already covered by a broader rule.",
+  "permissions/dead-path": "A permission entry points at a path that does not exist on this machine.",
   "memory/dead-import": "CLAUDE.md imports a file that does not exist.",
   "memory/import-cycle": "CLAUDE.md imports form a cycle.",
   "memory/duplicate-rule": "The same rule is stated twice in one file.",

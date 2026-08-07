@@ -17,7 +17,20 @@ import { firstToken, onPath } from "./hooks.js";
 import { SEVERITY, type RuleContext } from "./context.js";
 import type { Diagnostic, Position } from "../model/types.js";
 
-const VALID_TYPES = new Set(["stdio", "sse", "http"]);
+/**
+ * Valid MCP transport types.
+ *
+ * SOURCE OF TRUTH: `claude doctor` prints the accepted list when it rejects an
+ * unknown type ("Valid types are: stdio, sse, http (or streamable-http), ws,
+ * sdk"). An earlier hand-written version of this set omitted `ws`, `sdk`, and
+ * `streamable-http`, so cclint reported three legitimate transports as unknown.
+ *
+ * Verified against Claude Code 2.1.224.
+ */
+const VALID_TYPES = new Set(["stdio", "sse", "http", "streamable-http", "ws", "sdk"]);
+
+/** Transports addressed by URL rather than by spawning a local command. */
+const URL_TYPES = new Set(["sse", "http", "streamable-http", "ws"]);
 const ENV_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 
 interface ServerCtx {
@@ -179,6 +192,11 @@ function checkServer(s: ServerCtx): Diagnostic[] {
         position: at(`${s.path}.args`),
       });
     }
+  } else if (effectiveType === "sdk") {
+    // An `sdk` transport is supplied in-process by an embedding application, so
+    // it has neither a command to spawn nor a url to reach. Demanding either
+    // would be a false positive.
+    return out;
   } else if (!hasUrl) {
     out.push({
       ruleId: "mcp/malformed",

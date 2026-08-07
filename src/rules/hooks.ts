@@ -15,28 +15,91 @@ import { isPlainObject } from "../resolve/settings.js";
 import type { Diagnostic } from "../model/types.js";
 import { SEVERITY, type RuleContext } from "./context.js";
 
-/** Hook events Claude Code dispatches. An unknown event never fires. */
+/**
+ * Hook events Claude Code dispatches. An unknown event never fires.
+ *
+ * SOURCE OF TRUTH: `claude doctor` prints the full valid-event list whenever it
+ * rejects an unknown one. That is where this list comes from — do not hand-edit
+ * it from memory or documentation.
+ *
+ * To refresh after a Claude Code update:
+ *   1. put a bogus event in a settings.json
+ *   2. run `claude doctor` in that directory
+ *   3. copy the "Valid events:" list verbatim
+ *
+ * This matters more than it looks. An earlier version of this list had 9 events
+ * against the real 31, so cclint reported 22 perfectly valid hook events as
+ * "this hook will never fire" — telling users to delete working config, which is
+ * the single most damaging thing this tool could do. The conformance fixture
+ * `settings-unknown-hook-event` now pins it against the binary.
+ *
+ * Verified against Claude Code 2.1.224.
+ */
 export const KNOWN_EVENTS = new Set([
   "PreToolUse",
   "PostToolUse",
-  "UserPromptSubmit",
+  "PostToolUseFailure",
+  "PostToolBatch",
   "Notification",
-  "Stop",
-  "SubagentStop",
+  "UserPromptSubmit",
+  "UserPromptExpansion",
   "SessionStart",
   "SessionEnd",
+  "Stop",
+  "StopFailure",
+  "SubagentStart",
+  "SubagentStop",
   "PreCompact",
+  "PostCompact",
+  "PermissionRequest",
+  "PermissionDenied",
+  "Setup",
+  "TeammateIdle",
+  "TaskCreated",
+  "TaskCompleted",
+  "Elicitation",
+  "ElicitationResult",
+  "ConfigChange",
+  "WorktreeCreate",
+  "WorktreeRemove",
+  "InstructionsLoaded",
+  "CwdChanged",
+  "FileChanged",
+  "DirectoryAdded",
+  "MessageDisplay",
 ]);
 
-/** Built-in tool names, used to sanity-check plain-string matchers. */
+/**
+ * Built-in tool names, used to sanity-check plain-string hook matchers.
+ *
+ * UNLIKE `KNOWN_EVENTS`, THIS LIST HAS NO ORACLE. Probing the binary showed
+ * that Claude Code does not validate tool names at all: a hook matcher naming a
+ * tool that does not exist, and a `permissions.allow` entry naming one, both
+ * pass `claude doctor` without a word. An unknown matcher simply never matches.
+ *
+ * The real tool surface also shifts underneath us — it varies by Claude Code
+ * version, by enabled plugins, and by connected MCP servers, each of which can
+ * introduce names we cannot know about.
+ *
+ * Consequence: any finding based on this list is a guess, and the failure mode
+ * is telling someone their working hook is broken. So `hooks/unknown-matcher`
+ * is deliberately `info`-tier and off by default — see the severity policy in
+ * rules/context.ts. Do not promote it without an oracle.
+ */
 export const KNOWN_TOOLS = new Set([
   "Agent",
+  "AskUserQuestion",
   "Bash",
+  "BashOutput",
   "Edit",
+  "ExitPlanMode",
   "Glob",
   "Grep",
+  "KillShell",
   "NotebookEdit",
   "Read",
+  "Skill",
+  "SlashCommand",
   "Task",
   "TodoWrite",
   "WebFetch",
@@ -146,6 +209,10 @@ export function hookRules(ctx: RuleContext): Diagnostic[] {
               message: `Hook type must be "command" (got ${JSON.stringify(hook["type"])}).`,
               file: source.file,
               position: at(`${hookPath}.type`),
+              // Pointer shape matches `claude doctor` verbatim
+              // (`hooks.PreToolUse.0.hooks.0.type`), so the conformance suite
+              // can assert agreement per-pointer rather than per-file.
+              data: { pointer: `${hookPath}.type` },
             });
           }
 
@@ -157,6 +224,7 @@ export function hookRules(ctx: RuleContext): Diagnostic[] {
               message: "Hook is missing a non-empty `command`.",
               file: source.file,
               position: at(hookPath),
+              data: { pointer: `${hookPath}.command` },
             });
             return;
           }
@@ -217,13 +285,17 @@ function checkMatcher(matcher: unknown, m: MatcherCtx): void {
 
   m.out.push({
     ruleId: "hooks/unknown-matcher",
-    severity: SEVERITY.environmental,
-    message: `Hook matcher "${matcher}" does not match any known built-in tool.`,
+    // Info-tier, not a warning: we have no way to verify this. See the comment
+    // on KNOWN_TOOLS. Claude Code accepts any matcher string silently, and
+    // plugins and MCP servers add tool names we cannot enumerate.
+    severity: SEVERITY.heuristic,
+    message: `Hook matcher "${matcher}" does not name a tool known to this version of cclint.`,
     file: m.file,
     position: m.position,
     detail: [
-      "If this is an MCP tool it should look like mcp__<server>__<tool>.",
-      "If it is intended as a regex, this check is skipped for patterns containing regex syntax.",
+      "This may be fine: plugins and MCP servers add tools cclint cannot enumerate,",
+      "and Claude Code itself does not validate matcher names.",
+      "If it is genuinely a typo the hook will simply never fire.",
     ],
     heuristic: true,
     data: { matcher },

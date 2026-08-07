@@ -42,6 +42,43 @@ export interface HookOracleResult {
   executed: string[];
 }
 
+/**
+ * Result of the `claude doctor` oracle.
+ *
+ * `claude doctor` reads the settings files in a directory WITHOUT a trust
+ * prompt and without an API call, then reports what it rejected. It is a far
+ * richer oracle than `claude mcp list`: it validates hook events, JSON syntax,
+ * and MCP entries in one pass — and when it rejects an unknown hook event it
+ * prints the complete list of valid ones, which is the only trustworthy source
+ * for that list.
+ *
+ * Adopting it caught three live bugs at once: a hand-written event list with 9
+ * entries against the real 31, an MCP transport list missing `ws` / `sdk` /
+ * `streamable-http`, and — worst — silent tolerance of JSON comments that
+ * Claude Code rejects, discarding the entire file.
+ */
+export interface DoctorOracleResult {
+  claudeVersion: string;
+  /** Every hook event the binary accepts, verbatim from its own output. */
+  validHookEvents: string[];
+  /** Every settings complaint the binary raised. */
+  complaints: DoctorComplaint[];
+}
+
+export interface DoctorComplaint {
+  /** Project-relative where possible, so recordings are machine-independent. */
+  file: string;
+  /** The config pointer the binary named, e.g. `hooks.OnFileSave`. */
+  pointer?: string;
+  message: string;
+  kind:
+    | "unknown-hook-event"
+    | "malformed-json"
+    | "mcp-skipped"
+    | "hook-schema"
+    | "other";
+}
+
 const ANSI = /\[[0-9;]*m/g;
 
 export function stripAnsi(s: string): string {
@@ -244,6 +281,133 @@ function readLogWhenSettled(log: string, quietMs = 400, timeoutMs = 8_000): stri
 /** Synchronous sleep — this is a recording script, not a hot path. */
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Run `claude doctor` in the fixture and capture what it rejected.
+ *
+ * Output shape (after ANSI stripping):
+ *
+ *   Invalid settings
+ *   - <abs path> › hooks.OnFileSave: Unknown hook event "OnFileSave" was ignored. Valid events: A, B, C
+ *   - <abs path>: Invalid or malformed JSON
+ *   - <abs path> › mcpServers.x: Skipped — ...
+ *
+ * The section ends at the first blank line, so unrelated sections (Remote
+ * Control, warnings about PATH) are never mistaken for settings complaints.
+ */
+export function recordDoctorOracle(
+  projectDir: string,
+  fakeHome: string,
+): DoctorOracleResult {
+  let raw: string;
+  try {
+    raw = execFileSync("claude", ["doctor"], {
+      cwd: projectDir,
+      encoding: "utf8",
+      env: sandboxEnv(fakeHome),
+      timeout: 120_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    // doctor exits non-zero when it finds warnings; the report is still on stdout.
+    const e = error as { stdout?: string };
+    raw = e.stdout ?? "";
+  }
+
+  const output = stripAnsi(raw);
+  const complaints = parseDoctorComplaints(output, projectDir);
+  const validHookEvents = parseValidHookEvents(output);
+
+  if (validHookEvents.length === 0) {
+    throw new Error(
+      "`claude doctor` did not print a valid-hook-event list. The fixture must " +
+        "contain a settings.json with a deliberately unknown hook event — that " +
+        "is what makes the binary enumerate the valid ones.\n\n" +
+        `Raw output:\n${output.slice(0, 1200)}`,
+    );
+  }
+
+  return { claudeVersion: claudeVersion(), validHookEvents, complaints };
+}
+
+export function parseValidHookEvents(output: string): string[] {
+  const match = /Valid events:\s*([^\n]+)/.exec(output);
+  if (!match?.[1]) return [];
+  return match[1]
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => /^[A-Za-z]+$/.test(s));
+}
+
+export function parseDoctorComplaints(
+  output: string,
+  projectDir: string,
+): DoctorComplaint[] {
+  const lines = output.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === "Invalid settings");
+  if (start === -1) return [];
+
+  const out: DoctorComplaint[] = [];
+
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.trim() === "") break; // section ends at the first blank line
+    if (!line.trimStart().startsWith("- ")) continue; // e.g. "Suggested fix:" detail
+
+    const body = line.trimStart().slice(2);
+
+    // `<path> › <pointer>: <message>` or `<path>: <message>`
+    const withPointer = /^(.*?)\s*›\s*([^:]+):\s*(.*)$/.exec(body);
+
+    let file: string;
+    let pointer: string | undefined;
+    let message: string;
+
+    if (withPointer?.[1]) {
+      file = withPointer[1];
+      pointer = withPointer[2]?.trim();
+      message = (withPointer[3] ?? "").trim();
+    } else {
+      // Split on the first ": " AFTER index 2, so a Windows drive letter is
+      // not mistaken for the separator. A naive non-greedy `^(.*?):` split
+      // `D:\...\settings.local.json: Invalid or malformed JSON` into a file
+      // named "D" and swallowed the real path into the message.
+      const sep = body.indexOf(": ", 2);
+      if (sep === -1) continue;
+      file = body.slice(0, sep);
+      message = body.slice(sep + 2).trim();
+    }
+
+    out.push({
+      file: toRelative(projectDir, file.trim()),
+      ...(pointer ? { pointer } : {}),
+      message,
+      kind: classifyComplaint(message, pointer),
+    });
+  }
+
+  return out;
+}
+
+function classifyComplaint(
+  message: string,
+  pointer: string | undefined,
+): DoctorComplaint["kind"] {
+  if (/Unknown hook event/i.test(message)) return "unknown-hook-event";
+  if (/Invalid or malformed JSON/i.test(message)) return "malformed-json";
+  if (/^Skipped/i.test(message)) return "mcp-skipped";
+  // Anything else pointing into `hooks.` is a schema violation on an individual
+  // hook entry, e.g. `hooks.PreToolUse.0.hooks.0.command: Expected string`.
+  if (pointer?.startsWith("hooks.")) return "hook-schema";
+  return "other";
+}
+
+/** Recordings must not embed absolute paths from the recorder's machine. */
+function toRelative(projectDir: string, file: string): string {
+  const root = projectDir.split("\\").join("/");
+  const f = file.split("\\").join("/");
+  return f.startsWith(root) ? f.slice(root.length).replace(/^\/+/, "") : f;
 }
 
 export function recordOracle(projectDir: string, fakeHome: string): OracleResult {

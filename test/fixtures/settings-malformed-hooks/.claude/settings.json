@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command" }] },
+      { "matcher": "Edit", "hooks": [{ "type": "notacommand", "command": "x" }] }
+    ],
+    "OnFileSave": [
+      { "hooks": [{ "type": "command", "command": "echo never-fires" }] }
+    ]
+  }
+}

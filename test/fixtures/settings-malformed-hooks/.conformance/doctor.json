@@ -1,0 +1,56 @@
+{
+  "claudeVersion": "2.1.224",
+  "validHookEvents": [
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PostToolBatch",
+    "Notification",
+    "UserPromptSubmit",
+    "UserPromptExpansion",
+    "SessionStart",
+    "SessionEnd",
+    "Stop",
+    "StopFailure",
+    "SubagentStart",
+    "SubagentStop",
+    "PreCompact",
+    "PostCompact",
+    "PermissionRequest",
+    "PermissionDenied",
+    "Setup",
+    "TeammateIdle",
+    "TaskCreated",
+    "TaskCompleted",
+    "Elicitation",
+    "ElicitationResult",
+    "ConfigChange",
+    "WorktreeCreate",
+    "WorktreeRemove",
+    "InstructionsLoaded",
+    "CwdChanged",
+    "FileChanged",
+    "DirectoryAdded",
+    "MessageDisplay"
+  ],
+  "complaints": [
+    {
+      "file": ".claude/settings.json",
+      "pointer": "hooks.OnFileSave",
+      "message": "Unknown hook event \"OnFileSave\" was ignored. Valid events: PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, Notification, UserPromptSubmit, UserPromptExpansion, SessionStart, SessionEnd, Stop, StopFailure, SubagentStart, SubagentStop, PreCompact, PostCompact, PermissionRequest, PermissionDenied, Setup, TeammateIdle, TaskCreated, TaskCompleted, Elicitation, ElicitationResult, ConfigChange, WorktreeCreate, WorktreeRemove, InstructionsLoaded, CwdChanged, FileChanged, DirectoryAdded, MessageDisplay",
+      "kind": "unknown-hook-event"
+    },
+    {
+      "file": ".claude/settings.json",
+      "pointer": "hooks.PreToolUse.0.hooks.0.command",
+      "message": "Expected string, but received undefined",
+      "kind": "hook-schema"
+    },
+    {
+      "file": ".claude/settings.json",
+      "pointer": "hooks.PreToolUse.1.hooks.0.type",
+      "message": "Invalid input",
+      "kind": "hook-schema"
+    }
+  ]
+}

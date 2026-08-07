@@ -4,12 +4,17 @@ dist/
 .DS_Store
 
 # Running an oracle makes the real Claude Code binary write its own state into
-# the fixture's sandboxed home — including a machineID and userID. Those must
-# never be committed.
+# the fixture's sandboxed home — a machineID and userID in .claude.json, and a
+# session transcript per probe under projects/. None of it may be committed.
+#
+# Allowlist, not blocklist: ignore everything under the fixture's .claude/ and
+# re-admit only the files we deliberately author. A blocklist here already
+# missed projects/ once, and would miss whatever the binary writes next.
 test/fixtures/**/.fake-home/.claude.json
-test/fixtures/**/.fake-home/.claude/backups/
-test/fixtures/**/.fake-home/.claude/statsig/
-test/fixtures/**/.fake-home/.claude/*.backup*
+test/fixtures/**/.fake-home/.claude/*
+!test/fixtures/**/.fake-home/.claude/settings.json
+!test/fixtures/**/.fake-home/.claude/settings.local.json
+!test/fixtures/**/.fake-home/.claude/CLAUDE.md
 
 # Scratch output of the hook oracle. The recording in .conformance/ is the
 # committed artifact; this is just the raw probe log.

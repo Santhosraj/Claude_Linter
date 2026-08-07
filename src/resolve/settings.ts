@@ -44,10 +44,26 @@ export function resolveSettings(inputs: LayerInput[]): ResolutionResult {
     const p = parseJsonFile(input.file, input.text);
     parsed.set(input.file, p);
     diagnostics.push(...p.errors);
+
+    /**
+     * A file Claude Code throws away must not participate in the merge.
+     *
+     * This is a second-order consequence of strict-JSON parsing and it is easy
+     * to miss: a `settings.local.json` containing one comment is discarded
+     * wholesale, so it cannot override anything. Leaving it in the merge made
+     * cclint report the project layer as "overridden by project (local)" — a
+     * shadowing relationship that does not exist, pointing at a file that is
+     * not even loaded. We would have been describing a fiction in confident
+     * detail.
+     */
+    const discarded = p.errors.some(
+      (e) => e.ruleId === "json/parse-error" || e.ruleId === "json/not-strict-json",
+    );
+
     sources.push({
       file: input.file,
       layer: input.layer,
-      value: isPlainObject(p.value) ? p.value : undefined,
+      value: discarded || !isPlainObject(p.value) ? undefined : p.value,
       text: input.text,
       parseErrors: p.errors,
     });

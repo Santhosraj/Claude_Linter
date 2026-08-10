@@ -43,6 +43,17 @@ export function scanMarkdown(text: string): ScannedMarkdown {
   let paraLines: string[] = [];
   let paraStart = 0;
 
+  // The list item still open for continuation lines.
+  //
+  // A bullet wrapped across lines is ONE rule. Without this, every wrapped
+  // bullet was split at the physical newline into a truncated list item plus a
+  // headless paragraph — measured at 34 of 141 rules in a real CLAUDE.md. Both
+  // halves are sentence fragments, which poisons everything downstream: the
+  // semantic judge was handed rules ending mid-clause, duplicate detection
+  // compared partial text, and axis classification could miss the very word
+  // that identified the rule's side.
+  let openList: { block: DirectiveBlock; indent: number } | undefined;
+
   const flushParagraph = () => {
     if (paraLines.length === 0) return;
     const joined = paraLines.join(" ").trim();
@@ -66,6 +77,9 @@ export function scanMarkdown(text: string): ScannedMarkdown {
       const marker = fenceMatch[2] ?? "";
       if (fence === undefined) {
         flushParagraph();
+        // Prose after a fenced example is not a continuation of the bullet that
+        // preceded the fence.
+        openList = undefined;
         fence = marker[0];
       } else if (marker[0] === fence) {
         fence = undefined;
@@ -78,6 +92,7 @@ export function scanMarkdown(text: string): ScannedMarkdown {
     const importMatch = IMPORT.exec(raw);
     if (importMatch?.[1]) {
       flushParagraph();
+      openList = undefined;
       imports.push({
         target: importMatch[1],
         position: { line: i + 1, column: raw.indexOf("@") + 1 },
@@ -89,6 +104,7 @@ export function scanMarkdown(text: string): ScannedMarkdown {
     const headingMatch = HEADING.exec(raw);
     if (headingMatch) {
       flushParagraph();
+      openList = undefined;
       const depth = (headingMatch[1] ?? "#").length;
       const htext = stripInline(headingMatch[2] ?? "");
       headings.push({ text: htext, depth, position: { line: i + 1, column: 1 } });
@@ -104,20 +120,35 @@ export function scanMarkdown(text: string): ScannedMarkdown {
     if (listMatch?.[2]) {
       flushParagraph();
       const indent = (listMatch[1] ?? "").length;
-      blocks.push({
+      const block: DirectiveBlock = {
         text: stripInline(listMatch[2]),
-        position: { line: i + 1, column: indent + 1 },
+        position: { line: i + 1, column: indent + 1, endLine: i + 1 },
         headings: headingStack.map((h) => h.text),
         kind: "listItem",
-      });
+      };
+      blocks.push(block);
+      openList = { block, indent };
       continue;
     }
 
     // --- blank line ends a paragraph ------------------------------------
     if (raw.trim().length === 0) {
       flushParagraph();
+      openList = undefined;
       continue;
     }
+
+    // --- continuation of the open list item -------------------------------
+    // Indented deeper than its marker, so it belongs to that bullet rather
+    // than starting a paragraph. Lazy (unindented) continuation is legal
+    // CommonMark but is indistinguishable from a new paragraph here, and
+    // wrongly swallowing a paragraph is the worse error.
+    if (openList && leadingSpaces(raw) > openList.indent) {
+      openList.block.text = `${openList.block.text} ${stripInline(raw.trim())}`.trim();
+      openList.block.position.endLine = i + 1;
+      continue;
+    }
+    openList = undefined;
 
     if (paraLines.length === 0) paraStart = i;
     paraLines.push(stripInline(raw.trim()));
@@ -125,6 +156,16 @@ export function scanMarkdown(text: string): ScannedMarkdown {
   flushParagraph();
 
   return { headings, blocks, imports };
+}
+
+function leadingSpaces(line: string): number {
+  let n = 0;
+  for (const ch of line) {
+    if (ch === " ") n += 1;
+    else if (ch === "\t") n += 4;
+    else break;
+  }
+  return n;
 }
 
 /** Strip inline markdown so normalization and display are stable. */

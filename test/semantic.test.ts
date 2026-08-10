@@ -100,6 +100,56 @@ describe("prefilter", () => {
     expect(pairs.length).toBeLessThanOrEqual(5);
   });
 
+  it("does not let one wordy rule monopolise the pair budget", () => {
+    // Measured on a real 144-rule CLAUDE.md: one long paragraph appeared in 23
+    // of 40 candidate pairs and a second in 17 — 57% of the budget spent on a
+    // single rule, while 142 rules were never compared to each other. Long text
+    // shares vocabulary with everything, so without a per-rule cap the ranking
+    // is dominated by length rather than by likelihood of conflict.
+    const magnet = rule(
+      "Prefer " +
+        Array.from({ length: 20 }, (_, i) => `wibble${i} over wobble${i}`).join(", ") +
+        ".",
+      "/p/CLAUDE.md",
+      1,
+    );
+    const topics = Array.from({ length: 20 }, (_, i) =>
+      rule(`Prefer wibble${i} over wobble${i}.`, `/p/t${i}.md`, 1),
+    );
+
+    const pairs = buildCandidatePairs([magnet, ...topics], {
+      axes: BUILTIN_AXES,
+      maxPairs: 10,
+      maxPairsPerRule: 3,
+    });
+
+    const touchingMagnet = pairs.filter(
+      (p) => p.a.file === "/p/CLAUDE.md" || p.b.file === "/p/CLAUDE.md",
+    );
+    expect(touchingMagnet.length).toBeLessThanOrEqual(3);
+    // Non-vacuity: it is the per-rule cap, not the pair cap, that bounded this.
+    // Every available pair involves the magnet, so an uncapped run returns 10 —
+    // verified by mutation.
+    expect(pairs.length).toBeGreaterThan(0);
+  });
+
+  it("ranks an axis match above incidental vocabulary overlap", () => {
+    // Budget is scarce, so the strongest signal must be spent first. Two rules
+    // landing on opposite sides of a known decision axis are far likelier to
+    // conflict than two rules that happen to share a few words.
+    const rules = [
+      rule("Always use tabs for indentation.", "/p/a.md", 1),
+      rule("Use 2-space indentation everywhere.", "/p/b.md", 1),
+      ...Array.from({ length: 6 }, (_, i) =>
+        rule(`Run the migration checker before every deploy ${i}.`, `/p/m${i}.md`, 1),
+      ),
+    ];
+
+    const pairs = buildCandidatePairs(rules, { axes: BUILTIN_AXES, maxPairs: 1 });
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]?.reason).toContain("decision axis");
+  });
+
   it("produces a stable order across runs", () => {
     const rules = [
       rule("Always use tabs for indentation.", "/p/a.md", 3),

@@ -47,7 +47,9 @@ ${pc.bold("Options")}
 
 ${pc.bold("Semantic pass")} ${pc.dim("(opt-in; everything above is offline and free)")}
   --semantic                   adjudicate candidate rule conflicts with a model
-  --semantic-model <id>        default: claude-opus-5
+  --semantic-model <id>        default: claude-opus-5 (anthropic)
+  --semantic-provider <name>   anthropic (default) | gemini | ollama | openrouter | groq
+  --semantic-base-url <url>    any other OpenAI-compatible /chat/completions host
   --semantic-max-pairs <n>     cap adjudications per run (default: 40)
 `;
 
@@ -69,6 +71,8 @@ async function main(argv: string[]): Promise<number> {
       "no-budget": { type: "boolean", default: false },
       semantic: { type: "boolean", default: false },
       "semantic-model": { type: "string" },
+      "semantic-provider": { type: "string" },
+      "semantic-base-url": { type: "string" },
       "semantic-max-pairs": { type: "string" },
       "fail-on": { type: "string", default: "error" },
       version: { type: "boolean", default: false },
@@ -120,6 +124,8 @@ async function main(argv: string[]): Promise<number> {
     strict: values.strict,
     semantic: values.semantic === true && command !== "explain" && command !== "doctor",
     semanticModel: values["semantic-model"],
+    semanticProvider: values["semantic-provider"],
+    semanticBaseUrl: values["semantic-base-url"],
     semanticMaxPairs: values["semantic-max-pairs"]
       ? Number(values["semantic-max-pairs"])
       : undefined,
@@ -185,7 +191,8 @@ async function main(argv: string[]): Promise<number> {
       const s = result.semantic;
       process.stdout.write(
         `${pc.dim(
-          `Semantic pass: ${s.candidatePairs} candidate pair(s), ${s.adjudicated} judged by ${s.model}, ${s.cacheHits} from cache.`,
+          `Semantic pass: ${s.candidatePairs} candidate pair(s), ${s.adjudicated} judged by ${s.model}, ${s.cacheHits} from cache` +
+            (s.unexamined ? `, ${s.unexamined} NOT examined (stopped early).` : "."),
         )}\n`,
       );
       if (s.unavailableReason) {

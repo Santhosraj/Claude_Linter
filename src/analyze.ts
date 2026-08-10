@@ -33,6 +33,8 @@ export interface AnalyzeOptions extends DiscoveryOptions {
   /** Opt in to LLM adjudication of candidate rule conflicts. */
   semantic?: boolean;
   semanticModel?: string;
+  semanticProvider?: string | undefined;
+  semanticBaseUrl?: string | undefined;
   semanticMaxPairs?: number;
 }
 
@@ -97,6 +99,8 @@ export interface AnalysisResult {
 
 export interface SemanticSummary {
   candidatePairs: number;
+  /** Pairs skipped because the run stopped early. Never leave this implicit. */
+  unexamined?: number;
   adjudicated: number;
   cacheHits: number;
   model: string;
@@ -211,6 +215,8 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
     const adjudicator = new SemanticAdjudicator({
       apiKey: options.apiKey,
       model: options.semanticModel,
+      provider: options.semanticProvider,
+      baseUrl: options.semanticBaseUrl,
       maxPairs: options.semanticMaxPairs,
       projectRoot: discovery.projectRoot,
     });
@@ -219,7 +225,8 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
       candidatePairs: pairs.length,
       adjudicated: adjudicator.adjudicated,
       cacheHits: adjudicator.cacheHits,
-      model: options.semanticModel ?? "claude-opus-5",
+      unexamined: adjudicator.unexamined,
+      model: adjudicator.label,
       unavailableReason: adjudicator.unavailableReason,
     };
   }

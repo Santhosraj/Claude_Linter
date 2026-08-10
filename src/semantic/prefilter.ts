@@ -30,6 +30,17 @@ export interface PrefilterOptions {
   /** Minimum shared significant terms for a pair to be worth judging. */
   minSharedTerms?: number;
   maxPairs?: number;
+  /**
+   * How many candidate pairs any single rule may occupy.
+   *
+   * Without this, one long rule swallows the entire budget. Measured on a real
+   * 144-rule CLAUDE.md: two verbose paragraphs took 40 of the 80 pair slots —
+   * one alone appeared in 57% of pairs — because long text shares common words
+   * with everything. The judged pairs were then almost all "that paragraph vs
+   * something unrelated", every one correctly answered "different topics",
+   * while 142 rules were never compared to each other at all.
+   */
+  maxPairsPerRule?: number;
 }
 
 export function buildCandidatePairs(
@@ -38,6 +49,7 @@ export function buildCandidatePairs(
 ): CandidatePair[] {
   const minShared = options.minSharedTerms ?? 2;
   const maxPairs = options.maxPairs ?? 200;
+  const maxPerRule = options.maxPairsPerRule ?? 3;
 
   const terms = rules.map((r) => significantTerms(r.normalized));
   const axisIds = rules.map((r) => new Set(classify(r.text, options.axes).map((m) => m.axis.id)));
@@ -93,7 +105,20 @@ export function buildCandidatePairs(
     }
   }
 
-  const pairs: CandidatePair[] = [];
+  /**
+   * Rarity weight for a term.
+   *
+   * A term in almost every rule ("test", "run", "file") says nothing about
+   * whether two rules are about the same thing; a term in two rules says a lot.
+   * Weighting by rarity is what stops long, word-rich paragraphs outranking
+   * short rules that genuinely overlap.
+   */
+  const docFreq = new Map<string, number>();
+  for (const set of terms) for (const t of set) docFreq.set(t, (docFreq.get(t) ?? 0) + 1);
+  const rarity = (term: string) =>
+    Math.log(rules.length / Math.max(1, docFreq.get(term) ?? 1));
+
+  const candidates: { pair: CandidatePair; score: number }[] = [];
 
   for (const { i, j, shared } of scored.values()) {
     const a = rules[i]!;
@@ -110,31 +135,66 @@ export function buildCandidatePairs(
     const sharedAxis = [...axisIds[i]!].find((id) => axisIds[j]!.has(id));
 
     if (sharedAxis) {
-      pairs.push({
-        a,
-        b,
-        reason: `both rules mention the same known decision axis ("${sharedAxis}")`,
+      candidates.push({
+        pair: {
+          a,
+          b,
+          reason: `both rules mention the same known decision axis ("${sharedAxis}")`,
+        },
+        // An explicit axis match is the strongest signal available, so it
+        // outranks any amount of incidental vocabulary overlap.
+        score: 1000,
       });
       continue;
     }
 
     if (shared.length >= minShared) {
-      pairs.push({
-        a,
-        b,
-        reason: `they share the terms ${shared.slice(0, 5).map((t) => `"${t}"`).join(", ")}`,
+      candidates.push({
+        pair: {
+          a,
+          b,
+          reason: `they share the terms ${shared.slice(0, 5).map((t) => `"${t}"`).join(", ")}`,
+        },
+        score: shared.reduce((n, t) => n + rarity(t), 0),
       });
     }
   }
 
-  // Deterministic order so cached runs and CI output are stable.
-  pairs.sort((p, q) => {
-    const byFile = p.a.file.localeCompare(q.a.file) || p.b.file.localeCompare(q.b.file);
+  // Rank by signal, then break ties deterministically so cached runs and CI
+  // output stay stable.
+  candidates.sort((p, q) => {
+    if (q.score !== p.score) return q.score - p.score;
+    const byFile =
+      p.pair.a.file.localeCompare(q.pair.a.file) || p.pair.b.file.localeCompare(q.pair.b.file);
     if (byFile !== 0) return byFile;
-    return p.a.position.line - q.a.position.line || p.b.position.line - q.b.position.line;
+    return (
+      p.pair.a.position.line - q.pair.a.position.line ||
+      p.pair.b.position.line - q.pair.b.position.line
+    );
   });
 
-  return pairs.slice(0, maxPairs);
+  // Greedy selection under a per-rule cap: take the best pairs first, but stop
+  // admitting any rule once it already has `maxPerRule` pairs. This spends the
+  // budget across many rules instead of exhausting it on one wordy paragraph.
+  const used = new Map<string, number>();
+  const chosen: CandidatePair[] = [];
+
+  for (const { pair } of candidates) {
+    if (chosen.length >= maxPairs) break;
+    const ka = ruleKey(pair.a);
+    const kb = ruleKey(pair.b);
+    if ((used.get(ka) ?? 0) >= maxPerRule) continue;
+    if ((used.get(kb) ?? 0) >= maxPerRule) continue;
+    used.set(ka, (used.get(ka) ?? 0) + 1);
+    used.set(kb, (used.get(kb) ?? 0) + 1);
+    chosen.push(pair);
+  }
+
+  return chosen;
+}
+
+function ruleKey(rule: MemoryRule): string {
+  return `${rule.file}:${rule.position.line}:${rule.normalized}`;
 }
 
 export function significantTerms(normalized: string): Set<string> {

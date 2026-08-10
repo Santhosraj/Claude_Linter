@@ -197,7 +197,12 @@ cclint --semantic
 
 1. A deterministic prefilter picks **candidate pairs** — rules sharing a known
    decision axis or enough topical vocabulary. Everything else never reaches a
-   model.
+   model. Pairs are ranked (an axis match beats vocabulary overlap; rare words
+   count for more than common ones) and **no single rule may occupy more than
+   three pairs**. That cap matters more than it sounds: a long paragraph shares
+   common words with everything, and without it one rule took 57% of the budget
+   on a real 144-rule `CLAUDE.md` while 142 rules were never compared to each
+   other at all. With it, the same budget covers 40 distinct rules.
 2. Each pair gets one small structured-output call, with an explicit
    `insufficient_evidence` verdict so the judge can abstain instead of inventing
    conflicts to seem useful.

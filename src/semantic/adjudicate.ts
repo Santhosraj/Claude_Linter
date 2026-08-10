@@ -1,3 +1,4 @@
+
 /**
  * Optional semantic adjudication.
  *
@@ -21,30 +22,25 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import Anthropic from "@anthropic-ai/sdk";
-
 import { relative } from "../discovery/layers.js";
+import { resolveProvider, type Adjudication, type Provider } from "./providers.js";
 import { SEVERITY } from "../rules/context.js";
 import type { Diagnostic, MemoryRule } from "../model/types.js";
 
 export interface SemanticOptions {
   apiKey?: string | undefined;
   model?: string;
+  /** anthropic (default), or a shorthand like gemini / ollama / openrouter. */
+  provider?: string | undefined;
+  /** Explicit endpoint, for an OpenAI-compatible server not in the shorthand list. */
+  baseUrl?: string | undefined;
   /** Hard ceiling on adjudications per run, so a huge repo can't surprise anyone. */
   maxPairs?: number;
   cacheDir?: string;
   projectRoot: string;
 }
 
-export type Verdict = "conflict" | "compatible" | "insufficient_evidence";
-
-interface Adjudication {
-  verdict: Verdict;
-  /** One sentence. Rendered verbatim in the finding. */
-  reasoning: string;
-  /** How the two rules would diverge in practice. Empty unless `conflict`. */
-  divergence: string;
-}
+export type Verdict = Adjudication["verdict"];
 
 const RESULT_SCHEMA = {
   type: "object",
@@ -89,7 +85,7 @@ export interface CandidatePair {
 }
 
 export class SemanticAdjudicator {
-  private readonly client: Anthropic | undefined;
+  private readonly client: Provider | undefined;
   private readonly model: string;
   private readonly maxPairs: number;
   private readonly cacheFile: string;
@@ -98,23 +94,34 @@ export class SemanticAdjudicator {
 
   /** Populated when we could not run at all, so the CLI can say why. */
   public unavailableReason: string | undefined;
+  /** Which provider and model actually judged, e.g. `gemini...:gemini-2.0-flash`. */
+  public get label(): string {
+    return this.model;
+  }
   public adjudicated = 0;
   public cacheHits = 0;
+  /** Calls that returned something we could not read a verdict out of. */
+  private unreadable = 0;
+  /** Set on the first hard transport failure, e.g. a rate limit. */
+  private aborted = false;
+  /** Pairs never looked at because the run stopped early. */
+  public unexamined = 0;
 
   constructor(private readonly options: SemanticOptions) {
-    const apiKey = options.apiKey ?? process.env["ANTHROPIC_API_KEY"];
-    this.model = options.model ?? "claude-opus-5";
+    const resolved = resolveProvider({
+      provider: options.provider,
+      model: options.model,
+      baseUrl: options.baseUrl,
+      apiKey: options.apiKey,
+    });
+    // The cache key includes the provider label, so verdicts from a small local
+    // model never masquerade as verdicts from a frontier one.
+    this.model = resolved.provider?.label ?? resolved.config.model;
     this.maxPairs = options.maxPairs ?? 40;
     this.cacheFile = join(options.cacheDir ?? defaultCacheDir(), "semantic.json");
     this.cache = readCache(this.cacheFile);
-
-    if (!apiKey) {
-      this.client = undefined;
-      this.unavailableReason =
-        "ANTHROPIC_API_KEY is not set — semantic adjudication was skipped.";
-    } else {
-      this.client = new Anthropic({ apiKey });
-    }
+    this.client = resolved.provider;
+    if (resolved.unavailable) this.unavailableReason = resolved.unavailable;
   }
 
   async run(pairs: CandidatePair[]): Promise<Diagnostic[]> {
@@ -137,15 +144,33 @@ export class SemanticAdjudicator {
       });
     }
 
+    // A rule duplicated across three files yields three identical conflicts
+    // against the same counterpart. Users read that as three problems.
+    const reported = new Set<string>();
+
     for (const pair of budgeted) {
+      // Once the endpoint has hard-failed — a rate limit is the common case on
+      // free tiers — every remaining call will fail the same way. Firing them
+      // anyway wastes the user's time and quota for no information.
+      if (this.aborted) {
+        this.unexamined++;
+        continue;
+      }
+
       const verdict = await this.adjudicate(pair);
       if (!verdict || verdict.verdict !== "conflict") continue;
+
+      const pairKey = [pair.a.normalized, pair.b.normalized].sort().join("|");
+      if (reported.has(pairKey)) continue;
+      reported.add(pairKey);
 
       out.push({
         ruleId: "semantic/rule-conflict",
         severity: SEVERITY.environmental,
         heuristic: true,
-        message: `Conflicting instructions: ${verdict.reasoning}`,
+        message: verdict.reasoning
+          ? `Conflicting instructions: ${verdict.reasoning}`
+          : "Conflicting instructions (the judge gave no reason).",
         file: pair.b.file,
         position: pair.b.position,
         detail: [
@@ -157,6 +182,12 @@ export class SemanticAdjudicator {
         ].filter(Boolean),
         data: { verdict: verdict.verdict, model: this.model },
       });
+    }
+
+    if (this.adjudicated === 0 && this.unreadable > 0 && !this.unavailableReason) {
+      this.unavailableReason =
+        `${this.unreadable} response(s) from ${this.model} carried no readable verdict — ` +
+        "the model may not follow the JSON schema. Try a larger model.";
     }
 
     this.flush();
@@ -184,38 +215,27 @@ export class SemanticAdjudicator {
     ].join("\n");
 
     try {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: 4096,
+      const parsed = await this.client.judge({
         system: SYSTEM,
-        // A scoped pairwise classification — low effort is the right tier here,
-        // and keeps the opt-in pass genuinely cheap.
-        output_config: {
-          effort: "low",
-          format: { type: "json_schema", schema: RESULT_SCHEMA },
-        },
-        messages: [{ role: "user", content: prompt }],
+        prompt,
+        schema: RESULT_SCHEMA as unknown as Record<string, unknown>,
       });
-
-      // Check stop_reason before touching content: a refusal returns HTTP 200
-      // with empty or partial content, and indexing content[0] would throw.
-      if (response.stop_reason === "refusal") {
-        this.unavailableReason = "The model declined to judge one or more rule pairs.";
+      if (!parsed) {
+        // A response we cannot parse is not the same as "no conflict". Counting
+        // it lets the summary explain a zero instead of implying every pair was
+        // judged and found compatible — silent under-reporting is the failure
+        // mode this whole tool is built to avoid.
+        this.unreadable++;
         return undefined;
       }
-
-      const text = response.content.find((b) => b.type === "text");
-      if (!text || text.type !== "text") return undefined;
-
-      const parsed = JSON.parse(text.text) as Adjudication;
-      if (!isAdjudication(parsed)) return undefined;
 
       this.cache[key] = parsed;
       this.dirty = true;
       this.adjudicated++;
       return parsed;
     } catch (error) {
-      this.unavailableReason = `Semantic pass failed: ${
+      this.aborted = true;
+      this.unavailableReason = `Semantic pass stopped: ${
         error instanceof Error ? error.message.slice(0, 160) : String(error)
       }`;
       return undefined;
@@ -232,18 +252,6 @@ export class SemanticAdjudicator {
       // A non-writable cache is not a lint failure.
     }
   }
-}
-
-function isAdjudication(v: unknown): v is Adjudication {
-  if (typeof v !== "object" || v === null) return false;
-  const o = v as Record<string, unknown>;
-  return (
-    (o["verdict"] === "conflict" ||
-      o["verdict"] === "compatible" ||
-      o["verdict"] === "insufficient_evidence") &&
-    typeof o["reasoning"] === "string" &&
-    typeof o["divergence"] === "string"
-  );
 }
 
 /** Order-independent, so swapping A and B reuses the same cached verdict. */

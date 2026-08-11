@@ -7,18 +7,15 @@ instructions that contradict each other, and context you're paying for on every
 turn without realising it.
 
 ```bash
-npx claude-config-lint            # run it once, no install
-npx claude-config-lint doctor     # what was discovered, and why
-npx claude-config-lint explain hooks.PreToolUse
-npx claude-config-lint budget
+npx cclint                        # run it once, no install
+npx cclint doctor                 # what was discovered, and why
+npx cclint explain hooks.PreToolUse
+npx cclint budget
 ```
 
-Installing gives you the shorter `cclint`:
-
-```bash
-npm install -g claude-config-lint
-cclint            # same thing, less typing
-```
+`cclint` is a thin alias package; `npx claude-config-lint` is the same tool by
+its full name, and `npm install -g claude-config-lint` puts `cclint` on your
+`PATH` for good.
 
 The default run is **fully offline, free, and fast**. No API key, no network.
 

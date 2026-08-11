@@ -100,6 +100,43 @@ hooks.PreToolUse  [hooks]
   All 3 layer(s) contribute; none is overridden.
 ```
 
+**Which keys can you pass?** There is no fixed menu. `<key>` is a
+case-insensitive **prefix match against the keys your own settings files
+actually define**, so the answer is per-project. `cclint explain permissions`
+shows `allow`, `deny` and `ask` together; `cclint explain e` shows everything
+starting with `e`. `cclint doctor` lists the files being read.
+
+Nested paths are dynamic and cannot be enumerated in advance — `hooks.PreToolUse`,
+`env.MY_VAR` and `enabledPlugins.<plugin@marketplace>` become explain targets
+only once your settings define them. So `No settings key matches "hooks.PreToolUse"`
+means you have no such hook configured, not that the key is wrong.
+
+<details>
+<summary><b>The 32 keys cclint knows the merge rule for</b></summary>
+
+A separate list from the above: this governs **how** a key combines across
+layers, and applies whether or not you have it set. Anything absent from this
+table still resolves — it falls back to `override` and says it is guessing.
+
+| Key | Merge | Confidence |
+|---|---|---|
+| `hooks` | **additive** | **conformance** |
+| `permissions` | deepMerge | documented |
+| `permissions.allow`, `permissions.deny`, `permissions.ask` | concat | documented |
+| `permissions.additionalDirectories` | concat | assumed |
+| `permissions.defaultMode` | override | documented |
+| `permissions.disableBypassPermissionsMode` | override | assumed |
+| `env` | deepMerge | documented |
+| `enabledPlugins` | deepMerge | assumed |
+| `sandbox` | deepMerge | assumed |
+| `model`, `theme`, `outputStyle`, `statusLine`, `apiKeyHelper`, `cleanupPeriodDays`, `includeCoAuthoredBy` | override | documented |
+| `effortLevel`, `agent`, `forceLoginMethod`, `disableAllHooks`, `autoUpdates`, `autoUpdatesChannel`, `spinnerTipsEnabled`, `alwaysThinkingEnabled`, `switchModelsOnFlag`, `agentPushNotifEnabled`, `inputNeededNotifEnabled`, `awsAuthRefresh`, `awsCredentialExport`, `otelHeadersHelper` | override | assumed |
+
+Source of truth: [`src/model/merge-semantics.ts`](src/model/merge-semantics.ts).
+`cclint doctor` prints the live confidence breakdown.
+
+</details>
+
 ### `cclint budget` — what context actually costs
 
 Artifacts are classified by how they actually reach the model, because summing

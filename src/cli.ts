@@ -17,7 +17,12 @@ import { analyze } from "./analyze.js";
 import { confidenceBreakdown, MERGE_RULES } from "./model/merge-semantics.js";
 import { LAYER_LABEL } from "./model/types.js";
 import { relative } from "./discovery/layers.js";
-import { renderBudget, renderDiagnostics, renderExplain } from "./report/text.js";
+import {
+  renderBudget,
+  renderDiagnostics,
+  renderExplain,
+  renderExplainList,
+} from "./report/text.js";
 import { toSarif } from "./report/sarif.js";
 import { selectKeys } from "./resolve/settings.js";
 
@@ -29,6 +34,7 @@ ${pc.bold("cclint")} — lint CLAUDE.md, hooks, and MCP config
 ${pc.bold("Usage")}
   cclint [options]                 lint the project
   cclint explain <key>             show how a settings key resolves across layers
+  cclint explain                   list the settings keys available to explain
   cclint budget                    context-budget report only
   cclint doctor                    show discovered layers and merge-rule confidence
 
@@ -137,15 +143,40 @@ async function main(argv: string[]): Promise<number> {
   // ---- explain -------------------------------------------------------------
   if (command === "explain") {
     const query = positionals[1];
+    const explainContext = {
+      all: result.context.keys,
+      // A file Claude Code throws away is the reason a key can be in your
+      // settings and absent from this output. Surfaced on every explain.
+      discarded: result.context.resolution.sources
+        .filter((s) => s.value === undefined)
+        .map((s) => ({
+          file: s.file,
+          reason:
+            s.parseErrors[0]?.message ??
+            "top-level value is not a JSON object, so it contributes nothing",
+        })),
+    };
+
+    // No key lists what is available rather than erroring. The set is
+    // per-project and matched by prefix, so there is otherwise no way to
+    // discover it short of reading the source.
     if (!query) {
-      process.stderr.write(pc.red("explain requires a key, e.g. `cclint explain hooks`\n"));
-      return 2;
+      if (values.format === "json") {
+        process.stdout.write(`${JSON.stringify(explainContext, null, 2)}\n`);
+      } else {
+        process.stdout.write(`${renderExplainList(root, explainContext)}\n`);
+      }
+      return 0;
     }
+
     const keys = selectKeys(result.context.keys, query);
     if (values.format === "json") {
+      // Stays an array so `| jq length` remains the way to assert presence in
+      // CI — the exit code deliberately does not distinguish a miss, because a
+      // query with no results is not a tool failure.
       process.stdout.write(`${JSON.stringify(keys, null, 2)}\n`);
     } else {
-      process.stdout.write(`${renderExplain(keys, root, query)}\n`);
+      process.stdout.write(`${renderExplain(keys, root, query, explainContext)}\n`);
     }
     return 0;
   }

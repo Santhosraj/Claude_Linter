@@ -23,20 +23,6 @@ const readme = readFileSync(
 );
 
 describe("README", () => {
-  it("documents every key in the merge table", () => {
-    const missing = MERGE_RULES.map((r) => r.path).filter(
-      (path) => !readme.includes(`\`${path}\``),
-    );
-    expect(missing).toEqual([]);
-  });
-
-  it("states the merge-table size correctly", () => {
-    // `cclint doctor` prints this same denominator; if they disagree, one of
-    // them is lying to the user.
-    expect(readme).toContain(`The 32 keys cclint knows the merge rule for`);
-    expect(MERGE_RULES).toHaveLength(32);
-  });
-
   it("states the conformance ratio correctly", () => {
     const proven = MERGE_RULES.filter((r) => r.confidence === "conformance").length;
     expect(readme).toContain(`**${proven} of ${MERGE_RULES.length}** rules is conformance-tier`);

@@ -111,31 +111,35 @@ Nested paths are dynamic and cannot be enumerated in advance — `hooks.PreToolU
 only once your settings define them. So `No settings key matches "hooks.PreToolUse"`
 means you have no such hook configured, not that the key is wrong.
 
-<details>
-<summary><b>The 32 keys cclint knows the merge rule for</b></summary>
+Ask for a key you don't have and it tells you what you *do* have, rather than
+leaving you guessing whether the key is wrong or the config is missing:
 
-A separate list from the above: this governs **how** a key combines across
-layers, and applies whether or not you have it set. Anything absent from this
-table still resolves — it falls back to `override` and says it is guessing.
+```
+No settings key matches "permisions.deny".
 
-| Key | Merge | Confidence |
-|---|---|---|
-| `hooks` | **additive** | **conformance** |
-| `permissions` | deepMerge | documented |
-| `permissions.allow`, `permissions.deny`, `permissions.ask` | concat | documented |
-| `permissions.additionalDirectories` | concat | assumed |
-| `permissions.defaultMode` | override | documented |
-| `permissions.disableBypassPermissionsMode` | override | assumed |
-| `env` | deepMerge | documented |
-| `enabledPlugins` | deepMerge | assumed |
-| `sandbox` | deepMerge | assumed |
-| `model`, `theme`, `outputStyle`, `statusLine`, `apiKeyHelper`, `cleanupPeriodDays`, `includeCoAuthoredBy` | override | documented |
-| `effortLevel`, `agent`, `forceLoginMethod`, `disableAllHooks`, `autoUpdates`, `autoUpdatesChannel`, `spinnerTipsEnabled`, `alwaysThinkingEnabled`, `switchModelsOnFlag`, `agentPushNotifEnabled`, `inputNeededNotifEnabled`, `awsAuthRefresh`, `awsCredentialExport`, `otelHeadersHelper` | override | assumed |
+  Did you mean?
+    permissions.deny     .claude\settings.json:3
 
-Source of truth: [`src/model/merge-semantics.ts`](src/model/merge-semantics.ts).
-`cclint doctor` prints the live confidence breakdown.
+  10 key(s) are available. Run `cclint explain` with no key to list them, or
+  `cclint doctor` to see which files were read.
+```
 
-</details>
+**Discarded files are reported on every `explain`, hit or miss** — this is a
+correctness fix, not a nicety. A `settings.json` holding `permissions.deny` plus
+one trailing comma is thrown away wholesale, so `explain permissions.deny`
+truthfully finds no such key. Saying only that reads as *"you have no deny
+configured"*, when the truth is *"your deny is in the file and not in effect"* —
+the single most important thing this tool can tell you. So it says:
+
+```
+  1 file(s) discarded and NOT part of the resolution below:
+    .claude\settings.json — Trailing comma is not allowed here — Claude Code discards the whole file.
+    Keys defined only there do not appear here, and Claude Code ignores them too.
+```
+
+A miss exits **0**, deliberately: a query with no results is not a tool failure.
+To assert a key exists in CI, count the JSON instead —
+`cclint explain permissions.deny --format=json | jq length`.
 
 ### `cclint budget` — what context actually costs
 

@@ -113,12 +113,61 @@ export function renderBudget(budget: BudgetReport, root: string): string {
  * This is the flagship output: which layer won, which layers also contributed,
  * and which (if any) were genuinely discarded.
  */
-export function renderExplain(keys: ResolvedKey[], root: string, query: string): string {
+export interface ExplainContext {
+  /** Every resolvable key, so a miss can say what a hit would look like. */
+  all: ResolvedKey[];
+  /**
+   * Files Claude Code throws away. Reported on every explain, hit or miss.
+   *
+   * This is the fix for a genuine wrong-answer bug, not a nicety. A
+   * settings.json holding `permissions.deny` plus one trailing comma is
+   * discarded wholesale, so `explain permissions.deny` truthfully found no such
+   * key — and said so, in a way that reads as "you have no deny configured".
+   * The user's deny is sitting in the file, not in effect, and the one command
+   * that exists to explain that stayed silent, because `explain` returns before
+   * diagnostics are printed. Silence about config that is NOT in effect is the
+   * worst possible answer here.
+   */
+  discarded: { file: string; reason: string }[];
+}
+
+export function renderExplain(
+  keys: ResolvedKey[],
+  root: string,
+  query: string,
+  context: ExplainContext,
+): string {
   if (keys.length === 0) {
-    return pc.yellow(`No settings key matches "${query}".`);
+    const out = [pc.yellow(`No settings key matches "${query}".`)];
+
+    const suggestions = suggestKeys(query, context.all);
+    if (suggestions.length > 0) {
+      out.push("", `  ${pc.bold("Did you mean?")}`);
+      for (const s of suggestions) {
+        const at = s.contributions[0];
+        const where = at
+          ? pc.dim(`${relative(root, at.file)}${at.position ? `:${at.position.line}` : ""}`)
+          : "";
+        out.push(`    ${pc.cyan(s.path.padEnd(20))} ${where}`);
+      }
+    }
+
+    out.push(...discardedNotice(context.discarded, root));
+
+    // Never a bare "no". Discovery picking the wrong project root also lands
+    // here, and "0 keys are available" is what makes that legible.
+    out.push(
+      "",
+      pc.dim(
+        `  ${context.all.length} key(s) are available. Run \`cclint explain\` with no key to ` +
+          "list them, or `cclint doctor` to see which files were read.",
+      ),
+    );
+    return out.join("\n");
   }
 
   const lines: string[] = [];
+  lines.push(...discardedNotice(context.discarded, root));
   for (const key of keys) {
     const rule = ruleFor(key.path);
     lines.push("");
@@ -168,6 +217,102 @@ export function renderExplain(keys: ResolvedKey[], root: string, query: string):
   }
 
   return lines.join("\n");
+}
+
+/** `cclint explain` with no key — the list you cannot otherwise discover. */
+export function renderExplainList(root: string, context: ExplainContext): string {
+  const out: string[] = [];
+  out.push(...discardedNotice(context.discarded, root));
+
+  if (context.all.length === 0) {
+    out.push(
+      "",
+      pc.yellow("No settings keys were resolved."),
+      pc.dim("  Run `cclint doctor` to check which files were discovered."),
+    );
+    return out.join("\n");
+  }
+
+  out.push("", pc.bold(`${context.all.length} settings key(s) available to explain`));
+  out.push(pc.dim("  <key> is matched as a prefix, so `permissions` covers all three lists."));
+  out.push("");
+  for (const key of context.all) {
+    out.push(`  ${pc.cyan(key.path.padEnd(34))} ${pc.dim(`[${key.strategy}]`)}`);
+  }
+  return out.join("\n");
+}
+
+function discardedNotice(
+  discarded: { file: string; reason: string }[],
+  root: string,
+): string[] {
+  if (discarded.length === 0) return [];
+  const out = [
+    "",
+    pc.yellow(
+      `  ${discarded.length} file(s) discarded and NOT part of the resolution below:`,
+    ),
+  ];
+  for (const d of discarded) {
+    out.push(`    ${pc.red(relative(root, d.file))} ${pc.dim(`— ${d.reason}`)}`);
+  }
+  out.push(
+    pc.dim(
+      "    Keys defined only there do not appear here, and Claude Code ignores them too.",
+    ),
+  );
+  return out;
+}
+
+/**
+ * Near-misses for a key that did not match.
+ *
+ * Substring first, because `explain deny` returning nothing is the common trap
+ * — matching is by prefix, but "deny" is the word people think in. Then edit
+ * distance, which catches the typo case. That distinction matters most for
+ * security keys: without it, `explain permisions.deny` and a genuinely absent
+ * deny list print the same thing.
+ */
+export function suggestKeys(query: string, all: ResolvedKey[], limit = 5): ResolvedKey[] {
+  const q = query.toLowerCase();
+  const scored: { key: ResolvedKey; score: number }[] = [];
+
+  for (const key of all) {
+    const path = key.path.toLowerCase();
+    const last = path.split(".").pop() ?? path;
+    const qLast = q.split(".").pop() ?? q;
+
+    let score: number | undefined;
+    if (path.includes(q)) score = 0;
+    else {
+      const whole = editDistance(q, path);
+      const tail = editDistance(qLast, last);
+      const best = Math.min(whole, tail);
+      // Scale tolerance with length so short keys don't match everything.
+      if (best <= Math.max(1, Math.floor(Math.min(q.length, path.length) / 4))) score = best;
+    }
+    if (score !== undefined) scored.push({ key, score });
+  }
+
+  scored.sort((a, b) => a.score - b.score || a.key.path.localeCompare(b.key.path));
+  return scored.slice(0, limit).map((s) => s.key);
+}
+
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(
+        (prev[j] ?? 0) + 1,
+        (row[j - 1] ?? 0) + 1,
+        (prev[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = row;
+  }
+  return prev[b.length] ?? 0;
 }
 
 function format(value: unknown): string {

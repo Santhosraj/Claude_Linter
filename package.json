@@ -19,7 +19,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "conformance:record": "tsx scripts/record-conformance.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

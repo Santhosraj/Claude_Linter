@@ -7,10 +7,17 @@ instructions that contradict each other, and context you're paying for on every
 turn without realising it.
 
 ```bash
-npx cclint
-npx cclint explain hooks.PreToolUse
-npx cclint budget
-npx cclint doctor
+npx claude-config-lint            # run it once, no install
+npx claude-config-lint doctor     # what was discovered, and why
+npx claude-config-lint explain hooks.PreToolUse
+npx claude-config-lint budget
+```
+
+Installing gives you the shorter `cclint`:
+
+```bash
+npm install -g claude-config-lint
+cclint            # same thing, less typing
 ```
 
 The default run is **fully offline, free, and fast**. No API key, no network.
@@ -124,7 +131,7 @@ Prints discovered layers plus the merge-rule confidence breakdown (below).
 A linter is only as trustworthy as its model of the thing it's linting, so that
 model is tested rather than assumed.
 
-**Differential conformance testing.** Three oracles interrogate the real Claude
+**Differential conformance testing.** Four oracles interrogate the real Claude
 Code binary, and **none makes an API call** — so recording is free and CI can
 replay on every commit.
 
@@ -156,6 +163,12 @@ what promotes the tool's headline claim from documentation to fact:
 hooks-three-layer-accumulation → executed: user → projectShared → projectLocal
 ```
 
+*Trust.* `claude --debug` reports which settings sources it loaded and which it
+dropped, which is how the trust-gating claim gets pinned: the fixture supplies a
+project `allow` list from an untrusted workspace and the recording shows Claude
+Code ignoring it. This is the one finding users are most likely to disbelieve, so
+it is the one that most needed an oracle rather than an argument.
+
 No API call is possible: the sandboxed home holds no credentials, `ANTHROPIC_API_KEY`
 is stripped from the child environment, and the base URL points at a closed port.
 
@@ -175,9 +188,11 @@ reports the ratio; the goal is to drive it to all-`conformance`.
 
 A rule cannot be promoted by editing a label: `conformance` requires naming the
 fixtures that prove it, and a meta-test asserts those fixtures exist and carry
-recordings. Currently **1 of 28** rules is conformance-tier — `hooks`, the one
+recordings. Currently **1 of 32** rules is conformance-tier — `hooks`, the one
 whose blast radius is highest, since getting it wrong means telling users to
-delete hooks that are running.
+delete hooks that are running. 13 are `documented` and 18 `assumed`; `cclint
+doctor` prints the live breakdown, and that number is the honest measure of how
+far this has to go.
 
 **Severity policy.** `error` is reserved for what we can prove from the bytes on
 disk. Anything depending on the environment is `warning`; anything semantic is

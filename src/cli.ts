@@ -8,8 +8,9 @@
  *   2  the tool itself failed
  */
 
-import { existsSync, statSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import pc from "picocolors";
 
@@ -26,7 +27,29 @@ import {
 import { toSarif } from "./report/sarif.js";
 import { selectKeys } from "./resolve/settings.js";
 
-const VERSION = "0.1.0";
+/**
+ * Read from package.json rather than hardcoded, because a hardcoded copy rots
+ * silently and this one had: `npm version 0.2.0` left it at "0.1.0", so the
+ * built package reported the previous release from both `--version` and — worse
+ * — from every SARIF report, where the tool version is what GitHub code scanning
+ * uses to track a finding's history across runs.
+ *
+ * `../package.json` resolves correctly from both layouts: `src/cli.ts` sits one
+ * level below the repo root, and the built `dist/cli.js` one level below the
+ * package root. `files: ["dist"]` means the manifest is always shipped alongside.
+ */
+const VERSION = ((): string => {
+  try {
+    const manifest = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+    const { version } = JSON.parse(readFileSync(manifest, "utf8")) as { version?: string };
+    if (typeof version === "string" && version.length > 0) return version;
+  } catch {
+    // Fall through: never let `--version` crash the tool.
+  }
+  // Deliberately not a plausible-looking number. A wrong version that reads as
+  // real is worse than one that announces it could not be determined.
+  return "unknown";
+})();
 
 const HELP = `
 ${pc.bold("cclint")} — lint CLAUDE.md, hooks, and MCP config

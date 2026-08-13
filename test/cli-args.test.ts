@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -39,6 +39,31 @@ function run(args: string[]): Run {
     return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", status: e.status ?? 1 };
   }
 }
+
+describe.skipIf(!built)("reported version (requires npm run build)", () => {
+  /**
+   * The version was hardcoded in cli.ts, so `npm version 0.2.0` produced a build
+   * that still called itself 0.1.0 — in `--version` and in every SARIF report,
+   * where the tool version is what GitHub code scanning uses to track a finding
+   * across runs. Caught by installing the packed tarball and asking it; nothing
+   * in the suite would have.
+   */
+  const pkg = JSON.parse(
+    readFileSync(resolve(__dirname, "..", "package.json"), "utf8"),
+  ) as { version: string };
+
+  it("matches package.json, so a release cannot ship the previous number", () => {
+    expect(run(["--version"]).stdout.trim()).toBe(pkg.version);
+  });
+
+  it("stamps the same version into SARIF, which consumers key history on", () => {
+    const sarif = JSON.parse(run(["--format", "sarif", "--offline"]).stdout) as {
+      runs: { tool: { driver: { version?: string; semanticVersion?: string } } }[];
+    };
+    const driver = sarif.runs[0]!.tool.driver;
+    expect(driver.version ?? driver.semanticVersion).toBe(pkg.version);
+  });
+});
 
 describe.skipIf(!built)("argument validation (requires npm run build)", () => {
   it("rejects a --cwd that does not exist instead of walking up from it", () => {

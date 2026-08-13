@@ -15,7 +15,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative as relativePath } from "node:path";
 
 export interface OracleServer {
   status: "ok" | "skipped";
@@ -443,6 +443,17 @@ export interface TrustOracleResult {
    * combined number of entries dropped across them.
    */
   ignoredAllow: { files: string[]; count: number }[];
+  /**
+   * The `projects[...]` key the binary told us to set, relative to the fixture
+   * directory and posix-separated — `"../../.."` when it walked up to the
+   * enclosing git root, `"."` when the fixture itself is the key.
+   *
+   * Recorded relative because the absolute form is the recorder's own path and
+   * would make the expectation machine-specific. Relative keeps it portable
+   * while still pinning the only thing that matters: how far up the binary
+   * walks to decide what "this workspace" means.
+   */
+  trustKeyRelative?: string;
 }
 
 /**
@@ -464,20 +475,29 @@ export function recordTrustOracle(
   fakeHome: string,
   repeats = 3,
 ): TrustOracleResult {
-  const runs: TrustOracleResult["ignoredAllow"][] = [];
+  const runs: TrustProbe[] = [];
   for (let i = 0; i < repeats; i++) {
     rmSync(join(fakeHome, ".claude.json"), { force: true });
     runs.push(runTrustProbe(projectDir, fakeHome));
   }
 
   const signatures = runs.map((r) =>
-    JSON.stringify([...r].map((e) => ({ files: [...e.files].sort(), count: e.count })).sort((a, b) => a.files[0]!.localeCompare(b.files[0]!))),
+    JSON.stringify({
+      key: r.trustKey,
+      ignored: [...r.ignoredAllow]
+        .map((e) => ({ files: [...e.files].sort(), count: e.count }))
+        .sort((a, b) => a.files[0]!.localeCompare(b.files[0]!)),
+    }),
   );
   if (!signatures.every((s) => s === signatures[0])) {
     throw new Error(
       `Trust oracle was not stable across ${repeats} runs in ${projectDir}.\n` +
         runs
-          .map((r, i) => `  run ${i + 1}: ${r.map((e) => `${e.count} in ${e.files.join(" + ")}`).join("; ")}`)
+          .map(
+            (r, i) =>
+              `  run ${i + 1}: key=${r.trustKey ?? "?"} | ` +
+              r.ignoredAllow.map((e) => `${e.count} in ${e.files.join(" + ")}`).join("; "),
+          )
           .join("\n") +
         "\nRefusing to record a flaky expectation: an unstable reading here " +
         "argues for changing a permission rule, which is the most damaging " +
@@ -485,13 +505,33 @@ export function recordTrustOracle(
     );
   }
 
-  return { claudeVersion: claudeVersion(), ignoredAllow: runs[0]! };
+  const first = runs[0]!;
+  return {
+    claudeVersion: claudeVersion(),
+    ignoredAllow: first.ignoredAllow,
+    ...(first.trustKey
+      ? { trustKeyRelative: toRelativeKey(projectDir, first.trustKey) }
+      : {}),
+  };
 }
 
-function runTrustProbe(
-  projectDir: string,
-  fakeHome: string,
-): TrustOracleResult["ignoredAllow"] {
+/** `"."` when the key IS the fixture, else a posix `../..`-style path. */
+function toRelativeKey(projectDir: string, key: string): string {
+  const rel = relativePath(projectDir, key).split("\\").join("/");
+  return rel.length === 0 ? "." : rel;
+}
+
+export function parseTrustKey(output: string): string | undefined {
+  return /set projects\["([^"]+)"\]/.exec(output)?.[1];
+}
+
+interface TrustProbe {
+  ignoredAllow: TrustOracleResult["ignoredAllow"];
+  /** The `projects[...]` key the binary named, absolute and forward-slashed. */
+  trustKey: string | undefined;
+}
+
+function runTrustProbe(projectDir: string, fakeHome: string): TrustProbe {
   let raw: string;
   try {
     raw = execFileSync("claude", ["--debug", "-p", "conformance-probe"], {
@@ -506,7 +546,8 @@ function runTrustProbe(
     raw = `${e.stdout ?? ""}\n${e.stderr ?? ""}`;
   }
 
-  const output = stripAnsi(raw);
+  // The message wraps across lines, so newlines are collapsed before matching.
+  const output = stripAnsi(raw).replace(/\r?\n/g, " ");
   const ignoredAllow = parseIgnoredAllow(output);
 
   if (ignoredAllow.length === 0) {
@@ -518,7 +559,7 @@ function runTrustProbe(
     );
   }
 
-  return ignoredAllow;
+  return { ignoredAllow, trustKey: parseTrustKey(output) };
 }
 
 export function parseIgnoredAllow(output: string): { files: string[]; count: number }[] {

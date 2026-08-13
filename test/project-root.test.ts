@@ -1,9 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { discover, findProjectRoot } from "../src/discovery/layers.js";
+import {
+  discover,
+  findProjectRoot,
+  readWorkspaceTrust,
+  trustKeyFor,
+} from "../src/discovery/layers.js";
 
 /**
  * Project-root detection.
@@ -29,6 +34,110 @@ function scratch(): string {
 
 afterAll(() => {
   for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+});
+
+/**
+ * Workspace trust is keyed on the GIT root, which is not always our project
+ * root. `.claude` is a strong marker, so a subdirectory carrying one becomes our
+ * root while Claude Code keeps walking up to the repository — verified by
+ * repeated probes of 2.1.229, which ask for `projects["<git root>"]`. Keying on
+ * our own root read the wrong `~/.claude.json` entry and printed remediation
+ * naming a key the binary never reads, so following it left the warning up.
+ */
+describe("trustKeyFor", () => {
+  it("walks up to the enclosing git root, past a nearer .claude", () => {
+    const dir = scratch();
+    mkdirSync(join(dir, ".git"));
+    const nested = join(dir, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+    mkdirSync(join(nested, ".claude"));
+
+    // findProjectRoot stops at the nearer .claude; trust must not.
+    expect(findProjectRoot(nested)).toBe(resolve(nested));
+    expect(trustKeyFor(nested)).toBe(resolve(dir));
+  });
+
+  it("treats a `.git` FILE as a root, for worktrees and submodules", () => {
+    // A worktree's `.git` is a file holding a `gitdir:` pointer. Requiring a
+    // directory would silently fall back to the wrong key for anyone using one.
+    const dir = scratch();
+    writeFileSync(join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/x\n");
+    const nested = join(dir, "sub");
+    mkdirSync(nested);
+
+    expect(trustKeyFor(nested)).toBe(resolve(dir));
+  });
+
+  it("returns an enclosing git root, or the project root when there is none", () => {
+    const dir = scratch();
+    const project = join(dir, "proj");
+    mkdirSync(project);
+
+    /**
+     * Asserting the fallback directly is not portable: the OS temp directory can
+     * itself sit inside a repository — a home-directory dotfiles repo does it,
+     * and on this machine `C:\Users\Dell` is one, which is precisely why an early
+     * probe reported `projects["C:/Users/Dell"]` for a scratch directory. There
+     * the fallback is unobservable rather than wrong, so this asserts the
+     * contract that holds either way.
+     */
+    const key = trustKeyFor(project);
+    if (key === project) return; // no enclosing repo — fell back as intended
+    expect(existsSync(join(key, ".git")), `${key} should hold a .git`).toBe(true);
+    expect(project.startsWith(key), `${key} should be an ancestor`).toBe(true);
+  });
+});
+
+describe("readWorkspaceTrust", () => {
+  function storeWith(projects: unknown): string {
+    const home = scratch();
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects }));
+    return home;
+  }
+
+  /**
+   * The store is keyed on `trustKeyFor(project)`, not on the project directory —
+   * that IS the behaviour under test. On a machine whose temp directory sits
+   * inside a repository the two differ, and keying on the project would make
+   * these cases silently exercise the no-match path instead.
+   */
+  const keyFor = (project: string) => trustKeyFor(project).split("\\").join("/");
+
+  it("matches the project key case- and separator-insensitively", () => {
+    const project = scratch();
+    const home = storeWith({ [keyFor(project).toUpperCase()]: { hasTrustDialogAccepted: true } });
+    expect(readWorkspaceTrust(home, project).trusted).toBe(true);
+  });
+
+  it("reports unknown when duplicate keys for one directory disagree", () => {
+    // A real store holds both `D:/x` and `d:/x` for the same directory, and they
+    // can carry opposite flags. Returning the first hit made the answer depend on
+    // object key order — insertion order, unrelated to what the binary reads — so
+    // the same store could yield either verdict. `undefined` makes the rule stay
+    // silent instead of confidently reporting a live allow list as dead.
+    const project = scratch();
+    const key = keyFor(project);
+    const home = storeWith({
+      [key]: { hasTrustDialogAccepted: false },
+      [key.toUpperCase()]: { hasTrustDialogAccepted: true },
+    });
+    expect(readWorkspaceTrust(home, project).trusted).toBeUndefined();
+  });
+
+  it("still answers when duplicate keys agree", () => {
+    const project = scratch();
+    const key = keyFor(project);
+    const home = storeWith({
+      [key]: { hasTrustDialogAccepted: true },
+      [key.toUpperCase()]: { hasTrustDialogAccepted: true },
+    });
+    expect(readWorkspaceTrust(home, project).trusted).toBe(true);
+  });
+
+  it("treats a missing store as untrusted, not unknown", () => {
+    // Matches the binary, which gates allow entries in exactly this situation.
+    expect(readWorkspaceTrust(scratch(), scratch()).trusted).toBe(false);
+  });
 });
 
 describe("findProjectRoot", () => {

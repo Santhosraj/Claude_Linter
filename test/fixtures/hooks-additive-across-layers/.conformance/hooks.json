@@ -2,7 +2,7 @@
   "claudeVersion": "2.1.229",
   "event": "UserPromptSubmit",
   "executed": [
-    "user",
-    "projectShared"
+    "projectShared",
+    "user"
   ]
 }

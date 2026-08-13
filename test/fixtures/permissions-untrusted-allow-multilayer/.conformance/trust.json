@@ -8,5 +8,6 @@
       ],
       "count": 3
     }
-  ]
+  ],
+  "trustKeyRelative": "../../.."
 }

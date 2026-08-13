@@ -207,6 +207,22 @@ project `allow` list from an untrusted workspace and the recording shows Claude
 Code ignoring it. This is the one finding users are most likely to disbelieve, so
 it is the one that most needed an oracle rather than an argument.
 
+The recording also captures **which directory** the binary keys trust on, because
+that turned out not to be our project root. `.claude` is a strong root marker
+here, so a directory holding one becomes our root — while Claude Code keeps
+walking up to the enclosing **git root** and asks for `projects["<git root>"]`.
+cclint printed its own root in the remediation line, so following the advice
+exactly left the warning in place. The key is recorded relative to the fixture
+(`"../../.."`) to stay machine-independent, and a test asserts ours matches.
+
+Two things fell out of getting this right. A store can hold the same directory
+under several keys — `D:/x` and `d:/x` — with **opposite** flags; returning the
+first match made the verdict depend on object key order, so cclint now reports
+trust as unknown and stays silent rather than calling a live `allow` list dead.
+And the trust oracle now requires three runs to agree before recording: it ran
+the binary once, and a single unstable reading was briefly enough to argue a
+false positive into the permission rule and out again.
+
 No API call is possible: the sandboxed home holds no credentials, `ANTHROPIC_API_KEY`
 is stripped from the child environment, and the base URL points at a closed port.
 

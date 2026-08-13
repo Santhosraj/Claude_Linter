@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { analyze } from "../src/analyze.js";
@@ -168,6 +168,39 @@ describe.skipIf(trusts.length === 0)("workspace-trust conformance", () => {
         ).toEqual([]);
         expect(ours.length).toBe(named.size);
       });
+
+      /**
+       * The remediation has to name the key the binary actually reads.
+       *
+       * cclint keyed trust on its own `projectRoot`, and `.claude` is a strong
+       * root marker here — so a directory carrying one becomes our root while the
+       * binary keeps walking to the enclosing git root. The advice then named a
+       * key Claude Code never reads: following it exactly leaves the warning in
+       * place, which is worse than saying nothing.
+       *
+       * Recorded relative to the fixture so the expectation is not the
+       * recorder's own absolute path.
+       */
+      it.skipIf(recorded.trustKeyRelative === undefined)(
+        "keys trust on the same directory the binary asks for",
+        async () => {
+          const result = await analyze({
+            cwd: dir,
+            home: join(dir, ".fake-home"),
+            managedPolicyPath: join(dir, "__no_such_policy__.json"),
+            skipBudget: true,
+          });
+
+          const ours = result.context.discovery.workspaceTrust.key;
+          expect(ours, "cclint recorded no trust key").toBeDefined();
+
+          const oursRelative = relative(dir, ours!).split("\\").join("/") || ".";
+          expect(
+            oursRelative,
+            "the directory cclint keys trust on vs the one the binary named",
+          ).toBe(recorded.trustKeyRelative);
+        },
+      );
 
       it("records a count that proves deny, ask and user-allow are ungated", () => {
         // Guards the fixture itself: if someone simplifies it down to a bare

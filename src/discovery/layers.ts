@@ -70,6 +70,24 @@ export interface WorkspaceTrust {
   trusted: boolean | undefined;
   /** The `~/.claude.json` projects key that matched, for reporting. */
   matchedKey?: string;
+  /**
+   * The path Claude Code keys trust on — the **enclosing git root**, which is
+   * not always our `projectRoot`.
+   *
+   * `.claude` is a strong root marker here, so a directory carrying one becomes
+   * our root even when a `.git` sits above it. The binary keeps walking to the
+   * git root, verified by repeated probes of 2.1.229 from a directory below one:
+   * it asks for `projects["<git root>"]`, not the directory it is running in.
+   *
+   * Keying the lookup on `projectRoot` therefore read the wrong entry, and the
+   * remediation line told people to write a key the binary never reads —
+   * following the advice exactly would leave the warning in place, which is
+   * worse than no advice.
+   *
+   * Optional so fixture-built contexts stay valid; readers should fall back to
+   * `projectRoot`.
+   */
+  key?: string;
 }
 
 export interface Discovery {
@@ -326,6 +344,8 @@ function findSubdirectoryMemory(root: string, maxDepth = 4): string[] {
  * workspace as untrusted roughly half the time.
  */
 export function readWorkspaceTrust(home: string, projectRoot: string): WorkspaceTrust {
+  // Trust is keyed on the git root, not on our project root. See WorkspaceTrust.
+  const key = trustKeyFor(projectRoot);
   const store = join(home, ".claude.json");
 
   // No store at all means no workspace has ever been trusted, which is a
@@ -333,13 +353,13 @@ export function readWorkspaceTrust(home: string, projectRoot: string): Workspace
   // entries in exactly this situation. Only an unreadable or malformed store is
   // genuinely unknown; guessing there would risk telling someone their
   // permissions are being ignored when we simply could not tell.
-  if (!isFile(store)) return { trusted: false };
+  if (!isFile(store)) return { trusted: false, key };
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(store, "utf8"));
   } catch {
-    return { trusted: undefined };
+    return { trusted: undefined, key };
   }
 
   const projects =
@@ -349,19 +369,55 @@ export function readWorkspaceTrust(home: string, projectRoot: string): Workspace
 
   // A store with no projects map is well-formed and simply records no trusted
   // workspaces.
-  if (typeof projects !== "object" || projects === null) return { trusted: false };
+  if (typeof projects !== "object" || projects === null) return { trusted: false, key };
 
-  const want = normalizeProjectKey(projectRoot);
-  for (const [key, value] of Object.entries(projects as Record<string, unknown>)) {
-    if (normalizeProjectKey(key) !== want) continue;
+  const want = normalizeProjectKey(key);
+  const matches: { candidate: string; flag: boolean }[] = [];
+  for (const [candidate, value] of Object.entries(projects as Record<string, unknown>)) {
+    if (normalizeProjectKey(candidate) !== want) continue;
     if (typeof value !== "object" || value === null) continue;
     const flag = (value as Record<string, unknown>)["hasTrustDialogAccepted"];
-    if (typeof flag === "boolean") return { trusted: flag, matchedKey: key };
+    if (typeof flag === "boolean") matches.push({ candidate, flag });
   }
 
   // A project with no entry has never been opened interactively, so it has not
   // been trusted. That is a definite `false`, not an unknown.
-  return { trusted: false };
+  if (matches.length === 0) return { trusted: false, key };
+
+  /**
+   * Duplicate keys for one directory can DISAGREE. A real store on the machine
+   * this was written on holds both `D:/…/Claude_linter` (true) and
+   * `d:/…/Claude_linter` (false) — the case-insensitive match finds both.
+   *
+   * Returning the first hit made the verdict depend on object key order, which
+   * is insertion order and has nothing to do with which entry the binary reads.
+   * It happened to pick the right one here; a store written in the other order
+   * would have produced a confident false positive telling someone their allow
+   * list was dead. Two answers is not an answer, so this reports `undefined` —
+   * which the permission rule already treats as "say nothing about trust".
+   */
+  const distinct = new Set(matches.map((m) => m.flag));
+  if (distinct.size > 1) return { trusted: undefined, key };
+
+  return { trusted: matches[0]!.flag, matchedKey: matches[0]!.candidate, key };
+}
+
+/**
+ * The path Claude Code keys workspace trust on: the enclosing git root, or
+ * `projectRoot` when the tree is not a git repository.
+ *
+ * `.git` is matched as a file as well as a directory — it is a file containing a
+ * `gitdir:` pointer in a worktree or submodule, and treating those as "not a
+ * repository" would silently fall back to the wrong key for anyone using them.
+ */
+export function trustKeyFor(projectRoot: string): string {
+  let dir = resolve(projectRoot);
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return projectRoot; // hit the filesystem root
+    dir = parent;
+  }
 }
 
 function normalizeProjectKey(p: string): string {

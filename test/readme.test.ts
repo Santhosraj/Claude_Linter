@@ -30,14 +30,33 @@ describe("README", () => {
 
   it("does not promise install commands that cannot resolve", () => {
     // `npx <name>` resolves a PACKAGE name, not a bin name. Every npx command
-    // here must therefore name a package we actually publish — the README once
+    // here must therefore name something that actually resolves — the README once
     // opened with `npx cclint` while no such package existed, which was an E404
     // for every new reader.
-    const published = new Set(["claude-config-lint", "cclint"]);
+    //
+    // Two kinds resolve, and the distinction is the point: a package we publish,
+    // or a devDependency of this repo, which is what `npx tsx src/cli.ts` relies
+    // on for the run-from-a-clone instructions. Allowing only the former made
+    // this fail on a correct command; allowing anything would stop catching the
+    // E404 it exists for. Reading devDependencies keeps it self-maintaining —
+    // drop tsx from the manifest and the docs that use it start failing.
+    const pkg = JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
+    ) as { devDependencies?: Record<string, string> };
+
+    const resolvable = new Set([
+      "claude-config-lint",
+      "cclint",
+      ...Object.keys(pkg.devDependencies ?? {}),
+    ]);
+
     const invoked = [...readme.matchAll(/npx\s+(?:-p\s+\S+\s+)?([a-z0-9@/._-]+)/gi)].map(
       (m) => m[1]!,
     );
     expect(invoked.length).toBeGreaterThan(0);
-    expect(invoked.filter((name) => !published.has(name))).toEqual([]);
+    expect(
+      invoked.filter((name) => !resolvable.has(name)),
+      "these npx commands name nothing that resolves",
+    ).toEqual([]);
   });
 });

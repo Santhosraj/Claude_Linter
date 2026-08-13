@@ -19,6 +19,23 @@ its full name, and `npm install -g claude-config-lint` puts `cclint` on your
 
 The default run is **fully offline, free, and fast**. No API key, no network.
 
+**Requirements:** Node 20 or newer, and nothing else.
+
+**Running from a clone** — what to use while developing, or before a release has
+landed on npm:
+
+```bash
+npm install
+npx tsx src/cli.ts doctor              # the same CLI, straight from source
+npx tsx src/cli.ts --cwd "D:\some project"
+```
+
+Every command below works identically either way; `npx tsx src/cli.ts` simply
+replaces `cclint`. If you have both a global install and a clone, note that
+`npx cclint` prefers whatever is already on your machine over the registry — so
+a stale global install will shadow a newer release without saying so. `cclint
+--version` tells you which one you are actually running.
+
 > **Quote paths containing spaces.** `--cwd "D:\my project"`, not `--cwd D:\my project`.
 > Unquoted, the shell splits the path and the flag receives only the first
 > fragment. `cclint` rejects that with exit 2 rather than guessing — but the

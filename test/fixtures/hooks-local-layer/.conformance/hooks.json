@@ -1,5 +1,5 @@
 {
-  "claudeVersion": "2.1.224",
+  "claudeVersion": "2.1.229",
   "event": "UserPromptSubmit",
   "executed": [
     "projectShared",

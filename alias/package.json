@@ -1,6 +1,6 @@
 {
   "name": "cclint",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Short alias for claude-config-lint — lint CLAUDE.md, hooks, and MCP config for silent conflicts, dead references, and token bloat.",
   "type": "module",
   "bin": {
@@ -13,7 +13,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "claude-config-lint": "0.1.0"
+    "claude-config-lint": "0.2.0"
   },
   "license": "MIT",
   "repository": {

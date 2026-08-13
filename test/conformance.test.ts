@@ -130,54 +130,44 @@ describe.skipIf(trusts.length === 0)("workspace-trust conformance", () => {
       });
 
       /**
-       * KNOWN DIVERGENCE — cclint over-reports, and this pins it.
+       * The false-positive direction, and the assertion that caught the bug
+       * this fixture exists for.
        *
-       * cclint gates `permissions.allow` from BOTH project layers
-       * (`settings.json` and `settings.local.json`). The binary, run with its
-       * project root ABOVE the fixture directory, gates only `settings.json`:
-       * it names that file alone and its count excludes the local layer's
-       * entries entirely.
+       * cclint used to gate `permissions.allow` from BOTH project layers. The
+       * binary gates only `settings.json`: with allow entries in both project
+       * files it names that file alone, and its count excludes the local
+       * layer's entries. cclint therefore reported a `settings.local.json`
+       * grant as dead while Claude Code was honouring it.
        *
-       * The boundary cannot be isolated by a fixture, which is why it went
-       * unnoticed: the behaviour depends on the directory being the binary's
-       * project root, and the binary resolves that to the enclosing git root —
-       * this repository — for anything under test/fixtures. A fixture cannot
-       * carry its own `.git` to become a root, so no fixture here can put the
-       * local layer in the position a real project's local layer occupies.
-       *
-       * `it.fails` is deliberate: it passes while the divergence exists and
-       * starts failing the moment cclint is corrected, which forces this comment
-       * to be revisited instead of quietly outliving the bug.
+       * Comparing counts alone would not have caught it — the recorded total
+       * matched cclint's finding for `settings.json` perfectly. It took
+       * comparing the SET of files each side named.
        */
-      const localAllow = ((): number => {
-        const file = join(dir, ".claude", "settings.local.json");
-        if (!existsSync(file)) return 0;
-        const parsed = JSON.parse(readFileSync(file, "utf8")) as {
-          permissions?: Record<string, string[]>;
-        };
-        return parsed.permissions?.["allow"]?.length ?? 0;
-      })();
+      it("does not invent trust findings the binary never reported", async () => {
+        const result = await analyze({
+          cwd: dir,
+          home: join(dir, ".fake-home"),
+          managedPolicyPath: join(dir, "__no_such_policy__.json"),
+          skipBudget: true,
+        });
 
-      const named = new Set(recorded.ignoredAllow.flatMap((i) => i.files));
-      const divergent = localAllow > 0 && !named.has(".claude/settings.local.json");
+        const ours = result.diagnostics.filter(
+          (d) => d.ruleId === "permissions/untrusted-workspace",
+        );
+        const named = new Set(recorded.ignoredAllow.flatMap((i) => i.files));
 
-      (divergent ? it.fails : it)(
-        "does not invent trust findings the binary never reported",
-        async () => {
-          const result = await analyze({
-            cwd: dir,
-            home: join(dir, ".fake-home"),
-            managedPolicyPath: join(dir, "__no_such_policy__.json"),
-            skipBudget: true,
-          });
+        // One finding per file the binary named, and none for any file it did not.
+        const oursFiles = ours.map((d) => d.file.split("\\").join("/"));
+        const invented = oursFiles.filter(
+          (f) => ![...named].some((n) => f.endsWith(n)),
+        );
 
-          const ours = result.diagnostics.filter(
-            (d) => d.ruleId === "permissions/untrusted-workspace",
-          );
-          // One finding per file the binary named, across every message.
-          expect(ours.length).toBe(named.size);
-        },
-      );
+        expect(
+          invented,
+          "cclint claims these files have ignored allow entries; the binary does not",
+        ).toEqual([]);
+        expect(ours.length).toBe(named.size);
+      });
 
       it("records a count that proves deny, ask and user-allow are ungated", () => {
         // Guards the fixture itself: if someone simplifies it down to a bare

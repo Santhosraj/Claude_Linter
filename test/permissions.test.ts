@@ -212,6 +212,26 @@ describe("rules end to end", () => {
     expect(out.filter((d) => d.ruleId === "permissions/untrusted-workspace")).toEqual([]);
   });
 
+  it("does NOT gate the project-local allow list", () => {
+    // Probed against 2.1.229 in a git-rooted project carrying allow entries in
+    // both project files: the binary named `settings.json` alone and its
+    // ignored-entry count excluded the local layer. Gating "project layers" as
+    // a group is the intuitive reading and it over-reports — it calls a grant
+    // dead that Claude Code is honouring. Pinned by
+    // test/fixtures/permissions-untrusted-allow-multilayer.
+    const out = run(
+      [
+        {
+          file: "/proj/.claude/settings.local.json",
+          layer: "projectLocal",
+          json: { permissions: { allow: ["Bash(cat:*)"] } },
+        },
+      ],
+      false,
+    );
+    expect(out.filter((d) => d.ruleId === "permissions/untrusted-workspace")).toEqual([]);
+  });
+
   it("does NOT gate the user's own allow list", () => {
     const out = run(
       [

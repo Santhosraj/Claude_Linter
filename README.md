@@ -75,8 +75,12 @@ Deterministic findings only, by default. `--strict` adds heuristic ones.
   duplicates, paths that cannot exist, and — the one people are most surprised
   by — **project-level `allow` entries that Claude Code is ignoring entirely
   because the workspace has not been trusted**. That gating is narrow and each
-  boundary is pinned by a conformance fixture: only `allow`, only from a project
-  layer. `deny`, `ask`, and your own user-level `allow` keep working.
+  boundary is pinned by a conformance fixture: only `allow`, and only from the
+  shared `.claude/settings.json`. `deny`, `ask`, your own user-level `allow` and
+  your `settings.local.json` allow list all keep working. That last boundary is
+  narrower than it looks — cclint gated the local layer too until a fixture
+  caught it, which is the false-positive direction on the finding users are
+  least likely to believe.
 - **memory** — dead `@imports`, import cycles, rules duplicated within a file or
   across two files that are both always in context
 
@@ -206,6 +210,18 @@ dropped, which is how the trust-gating claim gets pinned: the fixture supplies a
 project `allow` list from an untrusted workspace and the recording shows Claude
 Code ignoring it. This is the one finding users are most likely to disbelieve, so
 it is the one that most needed an oracle rather than an argument.
+
+A second fixture puts allow entries in **both** project files, and it earned its
+place immediately by catching a live false positive: the binary names
+`settings.json` alone and its ignored-entry count excludes `settings.local.json`,
+so cclint had been reporting local grants as dead while Claude Code honoured
+them. Counts alone would not have caught it — the recorded total matched our
+`settings.json` finding exactly. It took comparing the *set of files* each side
+named, which is now what the test does. The binary also coalesces multiple files
+into one message with one combined count, so the recording stores a file list
+rather than a filename; parsing it as a single path produced
+`".claude/settings.json and .claude/settings.local.json"` — a path matching
+nothing, which made the harness report a miss on a finding we got right.
 
 No API call is possible: the sandboxed home holds no credentials, `ANTHROPIC_API_KEY`
 is stripped from the child environment, and the base URL points at a closed port.

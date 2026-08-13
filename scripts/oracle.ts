@@ -419,14 +419,30 @@ function toRelative(projectDir: string, file: string): string {
  *   Ignoring 2 permissions.allow entries from .claude/settings.json:
  *   this workspace has not been trusted.
  *
- * The count and the file name are the whole signal, and they are what pins the
+ * The count and the file names are the whole signal, and they are what pins the
  * gating boundaries: a fixture that also carries `deny`, `ask` and a user-level
  * `allow` proves those are NOT gated, because they are absent from the count.
+ *
+ * `files` is a LIST because the binary coalesces: when more than one project
+ * layer contributes allow entries it emits ONE message naming every file and a
+ * single COMBINED count —
+ *
+ *   Ignoring 2 permissions.allow entries from .claude/settings.json and
+ *   .claude/settings.local.json: this workspace has not been trusted.
+ *
+ * so the per-file split is not recoverable from the output. Recording a `file`
+ * per message (the previous shape) captured the literal string
+ * ".claude/settings.json and .claude/settings.local.json" as a filename — a path
+ * that matches nothing, which made the conformance test report that cclint had
+ * missed a finding it had actually reported correctly.
  */
 export interface TrustOracleResult {
   claudeVersion: string;
-  /** Per-file counts of ignored `permissions.allow` entries. */
-  ignoredAllow: { file: string; count: number }[];
+  /**
+   * One entry per message the binary emitted: the files it named, and the
+   * combined number of entries dropped across them.
+   */
+  ignoredAllow: { files: string[]; count: number }[];
 }
 
 export function recordTrustOracle(
@@ -462,16 +478,36 @@ export function recordTrustOracle(
   return { claudeVersion: claudeVersion(), ignoredAllow };
 }
 
-export function parseIgnoredAllow(output: string): { file: string; count: number }[] {
-  const out: { file: string; count: number }[] = [];
-  const re = /Ignoring (\d+) permissions\.allow (?:entry|entries) from ([^:]+):/g;
+export function parseIgnoredAllow(output: string): { files: string[]; count: number }[] {
+  const out: { files: string[]; count: number }[] = [];
+
+  /**
+   * Anchored on the trailing sentence rather than stopping at the first `:`.
+   * The file list is followed by ": this workspace has not been trusted", and a
+   * non-greedy `[^:]+` would truncate at a Windows drive letter the moment the
+   * binary prints an absolute path. If the sentence is ever reworded the match
+   * fails and `recordTrustOracle` throws — a loud failure, which is the correct
+   * outcome here. Silently recording an empty expectation would make the
+   * conformance test pass vacuously.
+   */
+  const re =
+    /Ignoring (\d+) permissions\.allow (?:entry|entries) from (.+?): this workspace has not been trusted/gs;
+
   let m: RegExpExecArray | null;
   while ((m = re.exec(output)) !== null) {
     const count = Number(m[1]);
-    const file = (m[2] ?? "").trim().split("\\").join("/");
-    if (Number.isFinite(count) && file) out.push({ file, count });
+    const files = splitFileList(m[2] ?? "");
+    if (Number.isFinite(count) && files.length > 0) out.push({ files, count });
   }
   return out;
+}
+
+/** `"a and b"` / `"a, b and c"` -> `["a", "b", "c"]`, normalised to forward slashes. */
+function splitFileList(list: string): string[] {
+  return list
+    .split(/,\s*|\s+and\s+/)
+    .map((f) => f.trim().split("\\").join("/"))
+    .filter((f) => f.length > 0);
 }
 
 export function recordOracle(projectDir: string, fakeHome: string): OracleResult {

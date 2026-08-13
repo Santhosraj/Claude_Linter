@@ -116,7 +116,7 @@ function main(): number {
           write(dir, "trust.json", result);
           process.stdout.write(
             `ok (claude ${result.claudeVersion}, ignored: ` +
-              result.ignoredAllow.map((i) => `${i.count} in ${i.file}`).join("; ") +
+              result.ignoredAllow.map((i) => `${i.count} in ${i.files.join(" + ")}`).join("; ") +
               ")\n",
           );
         } else if (oracle === "hooks") {

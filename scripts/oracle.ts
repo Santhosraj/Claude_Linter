@@ -445,10 +445,53 @@ export interface TrustOracleResult {
   ignoredAllow: { files: string[]; count: number }[];
 }
 
+/**
+ * Record the trust verdict, requiring agreement across several runs.
+ *
+ * The repeat is not ceremony copied from the hook oracle. This oracle recorded a
+ * single run, and a single run of this fixture once reported gating for
+ * `settings.json` alone where every subsequent run reported both project files.
+ * That one reading was enough to argue cclint had a false positive and to change
+ * the rule — the fix was wrong, and a stability check would have refused to
+ * record the reading that motivated it.
+ *
+ * `.claude.json` is deleted between probes because the binary WRITES it: leaving
+ * the previous run's trust store in place means each repeat starts from a
+ * different state, which is measuring the recorder rather than the binary.
+ */
 export function recordTrustOracle(
   projectDir: string,
   fakeHome: string,
+  repeats = 3,
 ): TrustOracleResult {
+  const runs: TrustOracleResult["ignoredAllow"][] = [];
+  for (let i = 0; i < repeats; i++) {
+    rmSync(join(fakeHome, ".claude.json"), { force: true });
+    runs.push(runTrustProbe(projectDir, fakeHome));
+  }
+
+  const signatures = runs.map((r) =>
+    JSON.stringify([...r].map((e) => ({ files: [...e.files].sort(), count: e.count })).sort((a, b) => a.files[0]!.localeCompare(b.files[0]!))),
+  );
+  if (!signatures.every((s) => s === signatures[0])) {
+    throw new Error(
+      `Trust oracle was not stable across ${repeats} runs in ${projectDir}.\n` +
+        runs
+          .map((r, i) => `  run ${i + 1}: ${r.map((e) => `${e.count} in ${e.files.join(" + ")}`).join("; ")}`)
+          .join("\n") +
+        "\nRefusing to record a flaky expectation: an unstable reading here " +
+        "argues for changing a permission rule, which is the most damaging " +
+        "place in this tool to be confidently wrong.",
+    );
+  }
+
+  return { claudeVersion: claudeVersion(), ignoredAllow: runs[0]! };
+}
+
+function runTrustProbe(
+  projectDir: string,
+  fakeHome: string,
+): TrustOracleResult["ignoredAllow"] {
   let raw: string;
   try {
     raw = execFileSync("claude", ["--debug", "-p", "conformance-probe"], {
@@ -475,7 +518,7 @@ export function recordTrustOracle(
     );
   }
 
-  return { claudeVersion: claudeVersion(), ignoredAllow };
+  return ignoredAllow;
 }
 
 export function parseIgnoredAllow(output: string): { files: string[]; count: number }[] {

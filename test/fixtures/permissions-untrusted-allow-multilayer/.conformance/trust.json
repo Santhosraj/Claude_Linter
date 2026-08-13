@@ -3,9 +3,10 @@
   "ignoredAllow": [
     {
       "files": [
-        ".claude/settings.json"
+        ".claude/settings.json",
+        ".claude/settings.local.json"
       ],
-      "count": 2
+      "count": 3
     }
   ]
 }

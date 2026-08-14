@@ -129,6 +129,39 @@ export interface ExplainContext {
    * worst possible answer here.
    */
   discarded: { file: string; reason: string }[];
+  /**
+   * Set when the workspace is NOT trusted, in which case Claude Code ignores
+   * project-layer `permissions.allow` entries entirely.
+   *
+   * Without this, `explain permissions.allow` printed the gated entries as
+   * `effective:` and added "All 1 layer(s) contribute; none is overridden" —
+   * while `cclint` in the same directory reported those exact entries as
+   * ignored. Two commands in one tool contradicting each other, on the
+   * security-relevant key, with the flagship command taking the wrong side.
+   *
+   * Same failure as `discarded` above: config that is in the file and not in
+   * effect is the single most important thing this command can tell you.
+   */
+  untrustedWorkspace?: { trustKey: string; home: string };
+}
+
+/**
+ * Is this contribution one Claude Code drops for want of workspace trust?
+ *
+ * Deliberately the same narrow boundary the permission rule enforces: only
+ * `allow`, and only from a project layer. Widening it here would contradict the
+ * lint output in the other direction.
+ */
+function isTrustGated(
+  key: ResolvedKey,
+  contribution: ResolvedKey["contributions"][number],
+  context: ExplainContext,
+): boolean {
+  if (!context.untrustedWorkspace) return false;
+  if (key.path !== "permissions.allow" && !key.path.startsWith("permissions.allow.")) {
+    return false;
+  }
+  return contribution.layer === "projectShared" || contribution.layer === "projectLocal";
 }
 
 export function renderExplain(
@@ -193,11 +226,18 @@ export function renderExplain(
     }
     lines.push("");
 
+    let gated = 0;
     for (const c of key.contributions) {
       const dead = key.shadowed.includes(c);
-      const bullet = dead ? pc.red("✗") : pc.green("✓");
+      const ignored = isTrustGated(key, c, context);
+      if (ignored) gated++;
+      const bullet = dead || ignored ? pc.red("✗") : pc.green("✓");
       const label = LAYER_LABEL[c.layer].padEnd(18);
-      const suffix = dead ? pc.red(" (overridden — no effect)") : "";
+      const suffix = dead
+        ? pc.red(" (overridden — no effect)")
+        : ignored
+          ? pc.red(" (ignored — workspace not trusted)")
+          : "";
       lines.push(`  ${bullet} ${label} ${format(c.value)}${suffix}`);
       lines.push(
         `    ${pc.dim(relative(root, c.file))}${c.position ? pc.dim(`:${c.position.line}`) : ""}`,
@@ -207,10 +247,44 @@ export function renderExplain(
     lines.push("");
     lines.push(`  ${pc.bold("effective:")} ${format(key.effective)}`);
 
+    /**
+     * The merge is correct — these entries ARE unioned by the resolution rules.
+     * Trust gating happens afterwards, so the merged value is reported as-is and
+     * the caveat is stated separately rather than by quietly editing the value.
+     */
+    if (gated > 0 && context.untrustedWorkspace) {
+      const { trustKey, home } = context.untrustedWorkspace;
+      const all = gated === key.contributions.length;
+      const which = all
+        ? gated === 1
+          ? "the project layer above"
+          : "every project layer above"
+        : `${gated} of the project layers above`;
+      lines.push(
+        pc.yellow(
+          `  ! Claude Code ignores ${which}: this workspace has not been trusted,`,
+        ),
+        pc.yellow(
+          `    so ${all ? "none of this allow list is" : "that part is not"} in effect right now.`,
+        ),
+        pc.dim(
+          `    Fix: run Claude Code here once and accept the trust dialog, or set\n` +
+            `      projects["${trustKey.replace(/\\/g, "/")}"].hasTrustDialogAccepted: true\n` +
+            `      in ${home.replace(/\\/g, "/")}/.claude.json`,
+        ),
+      );
+    }
+
     if (key.strategy === "hooks" || key.strategy === "concat") {
+      // "none is overridden" is true of the merge and false of what runs, once a
+      // layer is trust-gated. Saying it anyway is what made explain contradict
+      // the lint.
       lines.push(
         pc.dim(
-          `  All ${key.contributions.length} layer(s) contribute; none is overridden.`,
+          gated > 0
+            ? `  All ${key.contributions.length} layer(s) contribute to the merge; ` +
+                `${gated} then dropped for want of trust.`
+            : `  All ${key.contributions.length} layer(s) contribute; none is overridden.`,
         ),
       );
     }

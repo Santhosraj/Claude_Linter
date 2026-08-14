@@ -84,6 +84,70 @@ describe("explain misses", () => {
   });
 });
 
+describe("explain and workspace trust", () => {
+  /**
+   * `cclint` and `cclint explain` disagreed about the same three entries: the
+   * lint said "3 permissions.allow entries are ignored: this workspace has not
+   * been trusted", while explain printed them as `effective:` and added "All 1
+   * layer(s) contribute; none is overridden". The flagship command took the wrong
+   * side, on the security-relevant key. Seen on a real project, not constructed.
+   */
+  const allowKey = (layer: "projectShared" | "projectLocal" | "user"): ResolvedKey => ({
+    path: "permissions.allow",
+    strategy: "concat",
+    effective: ["Bash(ls:*)"],
+    contributions: [
+      {
+        layer,
+        file: "/p/.claude/settings.local.json",
+        value: ["Bash(ls:*)"],
+        position: { line: 3, column: 1 },
+      },
+    ],
+    shadowed: [],
+  });
+
+  const untrusted = {
+    all: [],
+    discarded: [],
+    untrustedWorkspace: { trustKey: "/p", home: "/home" },
+  };
+
+  it("says a project allow list is not in effect when untrusted", () => {
+    const out = renderExplain([allowKey("projectLocal")], "/p", "permissions.allow", untrusted);
+    expect(out).toMatch(/ignored — workspace not trusted/);
+    expect(out).toMatch(/not been trusted/);
+    // And must not repeat the claim that contradicted the lint.
+    expect(out).not.toMatch(/none is overridden/);
+  });
+
+  it("names the key to set, and it is the trust key rather than the project root", () => {
+    const out = renderExplain([allowKey("projectShared")], "/p", "permissions.allow", {
+      ...untrusted,
+      untrustedWorkspace: { trustKey: "/git/root", home: "/home" },
+    });
+    expect(out).toContain('projects["/git/root"]');
+  });
+
+  it("leaves the USER allow list alone — trust does not gate it", () => {
+    const out = renderExplain([allowKey("user")], "/p", "permissions.allow", untrusted);
+    expect(out).not.toMatch(/ignored — workspace not trusted/);
+    expect(out).toMatch(/none is overridden/);
+  });
+
+  it("says nothing about trust for deny, which is never gated", () => {
+    const deny: ResolvedKey = { ...allowKey("projectShared"), path: "permissions.deny" };
+    const out = renderExplain([deny], "/p", "permissions.deny", untrusted);
+    expect(out).not.toMatch(/trusted/);
+  });
+
+  it("stays quiet when the workspace IS trusted", () => {
+    const out = renderExplain([allowKey("projectLocal")], "/p", "permissions.allow", NO_DISCARDS);
+    expect(out).not.toMatch(/trusted/);
+    expect(out).toMatch(/none is overridden/);
+  });
+});
+
 describe("explain with no key", () => {
   it("lists the available keys rather than erroring", () => {
     const out = renderExplainList("/p", NO_DISCARDS);

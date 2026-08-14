@@ -178,6 +178,18 @@ async function main(argv: string[]): Promise<number> {
             s.parseErrors[0]?.message ??
             "top-level value is not a JSON object, so it contributes nothing",
         })),
+      // Without this, `explain permissions.allow` reported trust-gated entries as
+      // effective while `cclint` in the same directory called them ignored.
+      ...(result.context.discovery.workspaceTrust.trusted === false
+        ? {
+            untrustedWorkspace: {
+              trustKey:
+                result.context.discovery.workspaceTrust.key ??
+                result.context.discovery.projectRoot,
+              home: result.context.discovery.home,
+            },
+          }
+        : {}),
     };
 
     // No key lists what is available rather than erroring. The set is

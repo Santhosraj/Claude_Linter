@@ -7,7 +7,7 @@ instructions that contradict each other, and context you're paying for on every
 turn without realising it.
 
 ```bash
-npm install -g @santhosraj/cclint      # the command it installs is `cclint`
+npm install -g @santhosraj/cclint@latest  # the command it installs is `cclint`
 
 cclint                                 # the checks
 cclint doctor                          # what was discovered, and why

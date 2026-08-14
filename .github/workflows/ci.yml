@@ -31,11 +31,17 @@ jobs:
 
       - run: npm run typecheck
 
+      # MUST come before `npm test`. test/cli-args.test.ts spawns the built CLI
+      # and skips itself when dist/cli.js is absent — and dist/ is gitignored, so
+      # on a fresh checkout that skip was silent and the run still passed. Eleven
+      # tests never executed in CI, including the argument-validation suite that
+      # exists because an unquoted path with spaces made the tool lint the wrong
+      # project and report it clean.
+      - run: npm run build
+
       # Replays the recorded conformance corpus. Needs neither the Claude Code
       # binary nor network access — re-recording is a separate, manual step.
       - run: npm test
-
-      - run: npm run build
 
       # The tool must survive being pointed at its own repository.
       - name: Self-lint

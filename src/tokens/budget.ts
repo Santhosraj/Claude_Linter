@@ -23,6 +23,8 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { isDir, isFile, relative } from "../discovery/layers.js";
 import { readdirSync } from "node:fs";
 import { scanMarkdown } from "../parse/markdown.js";
+import { SEVERITY } from "../rules/context.js";
+import type { Diagnostic } from "../model/types.js";
 import type { CountMode, TokenCounter } from "./counter.js";
 
 export type LoadClass = "always" | "metadataOnly" | "onDemand";
@@ -47,6 +49,73 @@ export interface BudgetReport {
   perTurnTotal: number;
   contextWindow: number;
   degradedReason?: string | undefined;
+}
+
+/**
+ * Always-loaded tokens at which the cost is worth mentioning.
+ *
+ * A threshold is a judgment call, so this one is deliberately high. Running over
+ * a real project surfaced a 16,274-token `CLAUDE.md` — paid on every turn, for
+ * the life of the project — while the lint printed "No issues found" and left the
+ * number in a separate block the reader had already scrolled past. That gap is
+ * the tool's own headline pitch going unreported.
+ *
+ * 10,000 is chosen to be plainly defensible rather than tuned: it is far above a
+ * thorough CLAUDE.md (the sample fixtures sit in the hundreds) and far below the
+ * point where anyone would call it fine. Being `info` and off by default is what
+ * makes the number safe to be roughly right — nobody's build breaks on it.
+ */
+const ALWAYS_LOADED_NOTABLE = 10_000;
+
+/**
+ * The always-loaded context is large enough to be worth a line in the findings.
+ *
+ * Deliberately NOT an error or a warning. Nothing here is broken, a big
+ * CLAUDE.md can be entirely intentional, and severity in this project means
+ * something: `error` is reserved for what the bytes prove, and this is a
+ * judgment about cost. It rides with `--strict`.
+ */
+export function budgetDiagnostics(report: BudgetReport, projectRoot: string): Diagnostic[] {
+  if (report.alwaysLoaded < ALWAYS_LOADED_NOTABLE) return [];
+
+  const always = report.entries
+    .filter((e) => e.loadClass === "always")
+    .sort((a, b) => b.tokens - a.tokens);
+
+  const biggest = always[0];
+  if (!biggest) return [];
+
+  const share = ((report.alwaysLoaded / report.contextWindow) * 100).toFixed(1);
+  const estimated = biggest.mode !== "exact";
+
+  return [
+    {
+      ruleId: "memory/large-always-loaded",
+      severity: SEVERITY.heuristic,
+      heuristic: true,
+      message:
+        `${estimated ? "~" : ""}${report.alwaysLoaded.toLocaleString()} tokens are loaded on ` +
+        `every turn (${share}% of the context window).`,
+      file: biggest.file,
+      detail: [
+        ...always
+          .slice(0, 3)
+          .map(
+            (e) =>
+              `${estimated ? "~" : ""}${e.tokens.toLocaleString()}  ${relative(projectRoot, e.file)}`,
+          ),
+        ...(always.length > 3 ? [`… and ${always.length - 3} more always-loaded file(s)`] : []),
+        "This is a floor, not a total: it is spent before your prompt, on every turn.",
+        "Content only some tasks need can move to a nested CLAUDE.md or a skill, which",
+        "load on demand instead.",
+      ],
+      data: {
+        alwaysLoaded: report.alwaysLoaded,
+        contextWindow: report.contextWindow,
+        estimated,
+      },
+    },
+  ];
 }
 
 /** Context windows we know. Used only to render a percentage. */

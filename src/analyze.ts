@@ -16,7 +16,13 @@ import { resolveSettings, type LayerInput } from "./resolve/settings.js";
 import { scanMarkdown, toRules } from "./parse/markdown.js";
 import { SemanticAdjudicator } from "./semantic/adjudicate.js";
 import { buildCandidatePairs } from "./semantic/prefilter.js";
-import { buildBudget, contextWindowFor, expandImports, type BudgetReport } from "./tokens/budget.js";
+import {
+  buildBudget,
+  budgetDiagnostics,
+  contextWindowFor,
+  expandImports,
+  type BudgetReport,
+} from "./tokens/budget.js";
 import { TokenCounter } from "./tokens/counter.js";
 import type { Diagnostic, MemorySource, Severity } from "./model/types.js";
 import type { RuleContext } from "./rules/context.js";
@@ -231,9 +237,11 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
     };
   }
 
-  const filtered = applyConfig(diagnostics, config, options.strict === true);
-
   // --- budget --------------------------------------------------------------
+  // Runs BEFORE the severity filter, because it produces a finding of its own:
+  // an always-loaded context large enough to be worth reporting is only knowable
+  // once the tokens are counted, and it has to pass through `ignore`, severity
+  // overrides and the `--strict` gate like every other rule.
   let budget: BudgetReport | undefined;
   if (options.skipBudget !== true) {
     const model = options.model ?? config.model ?? "claude-opus-5";
@@ -258,7 +266,10 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
       counter,
     );
     counter.flush();
+    diagnostics.push(...budgetDiagnostics(budget, discovery.projectRoot));
   }
+
+  const filtered = applyConfig(diagnostics, config, options.strict === true);
 
   const counts: Record<Severity, number> = { error: 0, warning: 0, info: 0 };
   for (const d of filtered) counts[d.severity]++;

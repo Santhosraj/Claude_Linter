@@ -101,7 +101,15 @@ Deterministic findings only, by default. `--strict` adds heuristic ones.
   boundary is pinned by a conformance fixture: only `allow`, only from a project
   layer. `deny`, `ask`, and your own user-level `allow` keep working.
 - **memory** — dead `@imports`, import cycles, rules duplicated within a file or
-  across two files that are both always in context
+  across two files that are both always in context, and a `claude.md` that differs
+  from `CLAUDE.md` only by **case**. That last one is invisible on the machine
+  that has it: Claude Code matches the name literally, so the file is memory on
+  Windows and macOS and nothing at all on Linux or in CI, where the instructions
+  in it silently stop applying. Both projects I first ran this against had one.
+- **budget** — with `--strict`, an always-loaded context large enough to be worth
+  knowing about (10k+ tokens spent before your prompt, every turn). `info`,
+  because a big `CLAUDE.md` can be entirely deliberate — but a green checkmark
+  above a 16,000-token floor is the tool failing to mention its own headline.
 
 ### `cclint explain <key>` — the effective-config view
 

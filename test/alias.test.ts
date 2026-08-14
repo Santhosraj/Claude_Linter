@@ -38,7 +38,11 @@ describe("cclint alias package", () => {
 
   it("ships the bin and keeps a shebang on it", () => {
     expect(alias.files).toContain("bin.js");
-    expect(alias.bin.cclint).toBe("./bin.js");
+    // No leading `./`: npm rewrites bin paths at publish time and warns
+    // ("script name was cleaned"), which meant the manifest we committed was not
+    // the manifest that shipped. Storing the canonical form makes the published
+    // artifact match the source and silences a warning on every publish.
+    expect(alias.bin.cclint).toBe("bin.js");
     expect(read("alias/bin.js").startsWith("#!/usr/bin/env node")).toBe(true);
   });
 

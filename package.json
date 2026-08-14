@@ -4,8 +4,8 @@
   "description": "Lint CLAUDE.md, hooks, and MCP config for silent conflicts, dead references, and token bloat.",
   "type": "module",
   "bin": {
-    "cclint": "./dist/cli.js",
-    "claude-config-lint": "./dist/cli.js"
+    "cclint": "dist/cli.js",
+    "claude-config-lint": "dist/cli.js"
   },
   "files": [
     "dist"

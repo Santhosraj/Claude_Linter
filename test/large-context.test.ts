@@ -41,7 +41,16 @@ describe("large always-loaded context", () => {
     expect(d?.ruleId).toBe("memory/large-always-loaded");
     expect(d?.message).toContain("16,274");
     expect(d?.message).toContain("every turn");
-    expect(d?.message).toContain("1.6%");
+    // Two decimals, matching the budget block. Rendering the same quantity as
+    // `1.6%` here and `1.63%` there read as two different measurements.
+    expect(d?.message).toContain("1.63%");
+  });
+
+  it("skips the contributor list when a single file is the whole cost", () => {
+    // It would repeat the message and the file field directly above it.
+    const [d] = budgetDiagnostics(report(), "/p");
+    expect(d?.detail?.some((l) => l.includes("16,274  CLAUDE.md"))).toBe(false);
+    expect(d?.detail?.join(" ")).toMatch(/floor, not a total/);
   });
 
   it("stays info, so it never breaks a build on a judgment call", () => {

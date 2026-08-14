@@ -85,7 +85,10 @@ export function budgetDiagnostics(report: BudgetReport, projectRoot: string): Di
   const biggest = always[0];
   if (!biggest) return [];
 
-  const share = ((report.alwaysLoaded / report.contextWindow) * 100).toFixed(1);
+  // Two decimals, matching the budget block in report/text.ts. They render the
+  // same quantity on the same screen, and `1.6%` beside `1.63%` reads as two
+  // different measurements rather than one rounded twice.
+  const share = ((report.alwaysLoaded / report.contextWindow) * 100).toFixed(2);
   const estimated = biggest.mode !== "exact";
 
   return [
@@ -98,13 +101,22 @@ export function budgetDiagnostics(report: BudgetReport, projectRoot: string): Di
         `every turn (${share}% of the context window).`,
       file: biggest.file,
       detail: [
-        ...always
-          .slice(0, 3)
-          .map(
-            (e) =>
-              `${estimated ? "~" : ""}${e.tokens.toLocaleString()}  ${relative(projectRoot, e.file)}`,
-          ),
-        ...(always.length > 3 ? [`… and ${always.length - 3} more always-loaded file(s)`] : []),
+        // Only worth listing when the cost is split across files. With one
+        // contributor the line repeats the message and the file above it.
+        ...(always.length > 1
+          ? [
+              ...always
+                .slice(0, 3)
+                .map(
+                  (e) =>
+                    `${estimated ? "~" : ""}${e.tokens.toLocaleString()}  ` +
+                    relative(projectRoot, e.file),
+                ),
+              ...(always.length > 3
+                ? [`… and ${always.length - 3} more always-loaded file(s)`]
+                : []),
+            ]
+          : []),
         "This is a floor, not a total: it is spent before your prompt, on every turn.",
         "Content only some tasks need can move to a nested CLAUDE.md or a skill, which",
         "load on demand instead.",

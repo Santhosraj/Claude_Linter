@@ -120,6 +120,23 @@ describe.skipIf(!built)("argument validation (requires npm run build)", () => {
 describe.skipIf(!built)("doctor explains its root choice", () => {
   const fixture = resolve(__dirname, "fixtures", "sample-project");
 
+  it("shows the trust key when it differs from the project root", () => {
+    // The fixture is rooted by its own `.claude`, while trust keys on the
+    // enclosing git root — this repository. Without this line a reader comparing
+    // doctor against a `permissions/untrusted-workspace` finding sees two
+    // different paths and cannot tell that it is correct rather than a bug.
+    const r = run(["doctor", "--cwd", fixture, "--home", join(fixture, ".fake-home")]);
+    expect(r.stdout).toMatch(/trust key:/);
+    expect(r.stdout).toMatch(/enclosing git root/);
+  });
+
+  it("omits the trust key when it is the same as the project root", () => {
+    // Repeating the path would cost a scannable line for no information.
+    const r = run(["doctor", "--cwd", resolve(__dirname, "..")]);
+    expect(r.stdout).toMatch(/project root:/);
+    expect(r.stdout).not.toMatch(/trust key:/);
+  });
+
   it("names the marker that decided the root", () => {
     const r = run(["doctor", "--cwd", fixture, "--home", join(fixture, ".fake-home")]);
     expect(r.stdout).toMatch(/found \.claude here/);

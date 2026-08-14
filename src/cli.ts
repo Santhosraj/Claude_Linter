@@ -362,6 +362,27 @@ function renderDoctor(
   lines.push(`  project root: ${d.projectRoot}`);
   lines.push(pc.dim(`                ${why[prov.source]}`));
 
+  /**
+   * Trust is keyed on the enclosing git root, which is NOT always the project
+   * root — `.claude` is a strong root marker, so a directory holding one becomes
+   * our root while Claude Code keeps walking up to the repository.
+   *
+   * Only shown when the two differ. Otherwise it is a second copy of the line
+   * above, and `doctor` earns its keep by being scannable. When they DO differ,
+   * a reader comparing this output against a permission finding sees two
+   * different paths and has no way to know that is correct rather than a bug.
+   */
+  const trustKey = d.workspaceTrust.key;
+  if (trustKey && trustKey !== d.projectRoot) {
+    lines.push(`  trust key:    ${trustKey}`);
+    lines.push(
+      pc.dim(
+        "                the enclosing git root — Claude Code keys workspace\n" +
+          "                trust here, not on the project root above",
+      ),
+    );
+  }
+
   // The root can legitimately sit above where you pointed — but if the
   // directory you pointed at has its own CLAUDE.md, that file is being treated
   // as on-demand subtree memory rather than always-loaded project memory, and

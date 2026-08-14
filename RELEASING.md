@@ -33,7 +33,10 @@ that brevity at the cost of everything listed above.
 ## Steps
 
 ```bash
-# 1. Set the version in package.json.
+# 1. Set the version. This also COMMITS the bump and creates a `v<version>` tag —
+#    npm does both unless you pass --no-git-tag-version. Do not tag by hand
+#    afterwards; it already exists and `git tag` will refuse.
+npm version 0.2.1
 
 # 2. Full gate. prepublishOnly runs this again, but failing here is cheaper.
 npm run typecheck && npm test && npm run build
@@ -46,9 +49,11 @@ npm run conformance:record && npm test
 # 4. Publish.
 npm publish
 
-# 5. Tag, so the GitHub Action can be pinned to a release.
-git tag v$(node -p "require('./package.json').version")
-git push --tags
+# 5. Push the commit AND the tag. `npm version` made both locally and pushes
+#    neither, so it is easy to ship to npm and leave the repository behind —
+#    the Action can be pinned to a release only once the tag is on the remote.
+git push origin main
+git push origin "v$(node -p "require('./package.json').version")"
 ```
 
 Publishing requires 2FA. The CLI opens a browser to authenticate, so recovery
@@ -57,6 +62,22 @@ codes are enough — no authenticator app is needed. For a token-based publish
 2FA* enabled.
 
 ## Verify the published artifact
+
+**Wait a minute before verifying, and do not panic at a 404.** npm's publish path
+and its read path are separate systems. For a minute or so after a successful
+`+ @santhosraj/cclint@x.y.z`, the package can still 404 for `npm install`, `npx`,
+`npm view` and a raw registry GET — while `npm access list packages` already shows
+you own it. That combination is the signature of read-side lag, not a failed
+publish.
+
+This happened on 0.2.0 and cost real time chasing a phantom. If you see it:
+
+```bash
+npm access list packages | grep cclint    # owns it? then the publish DID land
+```
+
+Re-publishing the same version will be refused as a conflict, and renaming would
+burn a name for nothing. Wait and re-check; it resolved within 30 seconds.
 
 Do not trust a green test suite as evidence that the package works — it tests the
 source tree, not the tarball. Two defects reached this project by exactly that

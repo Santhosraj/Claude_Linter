@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 import type { LayerKind, MemoryLayer } from "../model/types.js";
 
@@ -244,11 +244,13 @@ export function discover(options: DiscoveryOptions = {}): Discovery {
   const memory: DiscoveredMemory[] = [];
   const claimedMemory = new Set<string>();
   const pushMemory = (file: string, layer: MemoryLayer) => {
-    const key = resolve(file);
+    const key = resolve(file).toLowerCase();
     if (claimedMemory.has(key)) return;
-    if (!isFile(file)) return;
+    // Record the name the filesystem actually uses, not the one we probed for.
+    const actual = actualCasing(file);
+    if (actual === undefined) return;
     claimedMemory.add(key);
-    memory.push({ file, layer });
+    memory.push({ file: actual, layer });
     return;
   };
 
@@ -291,6 +293,34 @@ export function discover(options: DiscoveryOptions = {}): Discovery {
     mcp,
     claudeDirs,
   };
+}
+
+/**
+ * `file` with the casing the filesystem actually uses, or `undefined` if it does
+ * not exist.
+ *
+ * Windows and stock macOS match filenames case-insensitively, so probing a
+ * constructed `CLAUDE.md` path finds a file that may be named `claude.md` — and
+ * then every line downstream prints the name we asked for instead of the name on
+ * disk. That is not cosmetic: Claude Code matches `CLAUDE.md` exactly, so
+ * `claude.md` is silently NOT loaded on a case-sensitive filesystem. Reporting
+ * the probed name hid the one fact that matters, and made the file look fine.
+ *
+ * Only called for paths already known to exist, so the readdir cost is bounded
+ * by the number of memory files found rather than the number probed.
+ */
+function actualCasing(file: string): string | undefined {
+  if (!isFile(file)) return undefined;
+  const want = basename(file).toLowerCase();
+  try {
+    for (const entry of readdirSync(dirname(file))) {
+      if (entry.toLowerCase() === want) return join(dirname(file), entry);
+    }
+  } catch {
+    // Unreadable directory: keep the path as given rather than dropping a file
+    // we know exists.
+  }
+  return file;
 }
 
 /**

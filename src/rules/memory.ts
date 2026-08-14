@@ -8,7 +8,7 @@
  * Wording the findings that way is the difference between correct and plausible.
  */
 
-import { dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 
 import { isFile, relative } from "../discovery/layers.js";
 import { scanMarkdown } from "../parse/markdown.js";
@@ -16,9 +16,65 @@ import { BUILTIN_AXES, classify, type Axis } from "./axes.js";
 import { SEVERITY, type RuleContext } from "./context.js";
 import type { Diagnostic, MemoryRule } from "../model/types.js";
 
+/**
+ * Memory filenames Claude Code recognises, in the exact casing it matches.
+ *
+ * The lookup is a literal name comparison, so anything differing only by case is
+ * loaded on Windows and stock macOS and NOT loaded on a case-sensitive
+ * filesystem — Linux, CI runners, most containers, and macOS volumes formatted
+ * case-sensitively.
+ */
+const CANONICAL_MEMORY_NAMES = ["CLAUDE.md", "CLAUDE.local.md"];
+
+/**
+ * A memory file whose name differs from the canonical one only by case.
+ *
+ * Found by running cclint over a real project: `model-overlays/claude.md` was
+ * being reported as `model-overlays\CLAUDE.md`, because discovery probed for the
+ * canonical name and Windows matched it case-insensitively. The tool showed the
+ * file participating in context under a name it does not have, and said nothing
+ * about the fact that a colleague on Linux, or CI, loads no such file.
+ *
+ * `warning`, not `error`: the bytes on disk prove the mismatch, but whether it
+ * breaks depends on the filesystem — and on the machine running cclint it is
+ * usually working, which is exactly what makes it easy to ship.
+ */
+function filenameCase(ctx: RuleContext): Diagnostic[] {
+  const out: Diagnostic[] = [];
+
+  for (const entry of ctx.discovery.memory) {
+    const name = basename(entry.file);
+    if (CANONICAL_MEMORY_NAMES.includes(name)) continue;
+
+    const canonical = CANONICAL_MEMORY_NAMES.find(
+      (c) => c.toLowerCase() === name.toLowerCase(),
+    );
+    if (canonical === undefined) continue; // not a case variant; not our business
+
+    out.push({
+      ruleId: "memory/filename-case",
+      severity: SEVERITY.environmental,
+      message: `\`${name}\` differs from \`${canonical}\` only by case.`,
+      file: entry.file,
+      detail: [
+        `Claude Code looks for \`${canonical}\` exactly.`,
+        "This filesystem matches names case-insensitively, so the file loads here —",
+        "but on a case-sensitive one (Linux, CI, most containers) it is never read,",
+        "and the instructions in it silently stop applying.",
+        `Fix: rename to \`${canonical}\`.`,
+      ],
+      data: { found: name, expected: canonical },
+    });
+  }
+
+  return out;
+}
+
 export function memoryRules(ctx: RuleContext, axes: Axis[] = BUILTIN_AXES): Diagnostic[] {
   const out: Diagnostic[] = [];
   const root = ctx.discovery.projectRoot;
+
+  out.push(...filenameCase(ctx));
 
   // --- dead @imports -------------------------------------------------------
   for (const source of ctx.memory) {

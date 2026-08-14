@@ -1,19 +1,34 @@
 # Releasing
 
-One package: **`cclint`**. The bin and the package share that name, so
-`npx cclint` resolves directly — npx looks up a package name, not a bin name.
+One package: **`@santhosraj/cclint`**, installing a command called **`cclint`**.
 
-It used to be two. `claude-config-lint` was the core and `cclint` a one-line
-alias wrapping it, which existed only so `npx cclint` would resolve at all. That
-structure is gone, and with it an exact-version pin between the two, a sync
-script, a publish-order rule, and a whole class of release-day mistake where the
-most-advertised entry point silently ran old code.
+`publishConfig.access` is set to `public` in package.json, so a plain
+`npm publish` works. Scoped packages default to restricted, and forgetting
+`--access=public` is the classic first-release failure.
 
-The reason for the collapse is worth recording: `claude-config-lint` on npm
-belongs to **someone else** — an unrelated project by another author. The name
-was never available to this project, and the first release attempt failed with
-`403 You do not have permission to publish`. `cclint` was free, and it is the
-name the documentation already led with.
+The registry decided this name, after refusing two others:
+
+| Name | Outcome |
+|---|---|
+| `claude-config-lint` | owned by an unrelated author — `403 You do not have permission` |
+| `cclint` (unscoped) | `403 too similar to existing package cc-lint` |
+| `@santhosraj/cclint` | your own scope; cannot collide |
+
+Worth knowing for any future rename: **`npm view <name>` returning 404 does not
+mean the name is publishable.** Both rejected names were absent from the
+registry. Ownership and the similarity check are only evaluated server-side when
+you publish, so a name is unproven until an actual publish succeeds.
+
+It used to be two packages. `claude-config-lint` was the core and `cclint` a
+one-line alias wrapping it, which existed only so `npx cclint` would resolve at
+all. That structure is gone, and with it an exact-version pin between the two, a
+sync script, a publish-order rule, and a whole class of release-day mistake where
+the most-advertised entry point silently ran old code.
+
+The alias stopped earning its keep once the core could not take the short name
+either. A scoped package installs the `cclint` command directly, so the only
+thing lost is brevity in `npx`, and the only thing gained by an alias would be
+that brevity at the cost of everything listed above.
 
 ## Steps
 
@@ -53,16 +68,19 @@ Install what a stranger would get:
 
 ```bash
 cd "$(mktemp -d)" && npm init -y >/dev/null
-npm install cclint
+npm install @santhosraj/cclint
 printf '{ "model": "x", }\n' > settings.json && mkdir -p .claude && mv settings.json .claude/
 ./node_modules/.bin/cclint --offline    # expect: json/not-strict-json, exit 1
 ./node_modules/.bin/cclint --version    # expect: the version you just published
 ```
 
-**Use the explicit path, or pin the version.** A bare `npx cclint` prefers a
-binary already installed on the machine over the registry, silently — so a stale
-global install will shadow the release you are trying to verify and report
-success. `npx cclint@<version>` forces the registry.
+**Use the explicit path, or pin the version.** A bare `cclint`, or
+`npx @santhosraj/cclint` without a version, prefers a binary already installed on
+the machine over the registry, silently —
+so a stale global install will shadow the release you are trying to verify and
+report success. That is not hypothetical: it made a broken published package look
+healthy during the 0.2.0 work. `npx @santhosraj/cclint@<version>` forces the
+registry.
 
 ## Version support
 

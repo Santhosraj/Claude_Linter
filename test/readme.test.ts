@@ -44,13 +44,39 @@ describe("README", () => {
       readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
     ) as { devDependencies?: Record<string, string> };
 
-    // `cclint` is the published name, and the only one. The core used to be
-    // `claude-config-lint` with `cclint` as a thin alias; that name belongs to an
-    // unrelated project on npm and was never available here.
-    const resolvable = new Set(["cclint", ...Object.keys(pkg.devDependencies ?? {})]);
+    /**
+     * Read the package's own name rather than hardcoding it — this project has
+     * now been renamed twice by the registry, and each time a hardcoded list here
+     * would have gone stale in the direction that matters: claiming an npx command
+     * resolves when it 404s.
+     *
+     * `claude-config-lint` belongs to an unrelated author. Unscoped `cclint` is
+     * refused as too similar to an existing `cc-lint` — and note that
+     * `npm view cclint` returned 404 throughout, because absence from the registry
+     * is not the same as being publishable.
+     */
+    const pkgName = (JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
+    ) as { name: string }).name;
 
-    const invoked = [...readme.matchAll(/npx\s+(?:-p\s+\S+\s+)?([a-z0-9@/._-]+)/gi)].map(
-      (m) => m[1]!,
+    const resolvable = new Set([pkgName, ...Object.keys(pkg.devDependencies ?? {})]);
+
+    /**
+     * A documented command may pin a version — `npx pkg@1.2.3`, and the README
+     * recommends exactly that to defeat a stale global install. Strip the spec
+     * before checking the name.
+     *
+     * The FIRST `@` of a scoped name is part of the name, so only a later one
+     * separates the version: `@scope/name@1.2.3` -> `@scope/name`, while
+     * `@scope/name` is left alone.
+     */
+    const bareName = (ref: string): string => {
+      const at = ref.lastIndexOf("@");
+      return at > 0 ? ref.slice(0, at) : ref;
+    };
+
+    const invoked = [...readme.matchAll(/npx\s+(?:-p\s+\S+\s+)?([a-z0-9@/._-]+)/gi)].map((m) =>
+      bareName(m[1]!),
     );
     expect(invoked.length).toBeGreaterThan(0);
     expect(

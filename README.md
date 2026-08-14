@@ -7,13 +7,20 @@ instructions that contradict each other, and context you're paying for on every
 turn without realising it.
 
 ```bash
-npx cclint                        # run it once, no install
-npx cclint doctor                 # what was discovered, and why
-npx cclint explain hooks.PreToolUse
-npx cclint budget
+npm install -g @santhosraj/cclint      # the command it installs is `cclint`
+
+cclint                                 # the checks
+cclint doctor                          # what was discovered, and why
+cclint explain hooks.PreToolUse
+cclint budget
 ```
 
-`npm install -g cclint` puts it on your `PATH` for good.
+Or run it once without installing: `npx @santhosraj/cclint doctor`.
+
+The package is scoped; the command is not. `cclint` is what you type after
+installing, and it is the name used throughout this document. The unscoped
+`cclint` on npm is unavailable — the registry rejects it as too similar to an
+existing `cc-lint`, and `claude-config-lint` belongs to an unrelated project.
 
 The default run is **fully offline, free, and fast**. No API key, no network.
 
@@ -30,9 +37,10 @@ npx tsx src/cli.ts --cwd "D:\some project"
 
 Every command below works identically either way; `npx tsx src/cli.ts` simply
 replaces `cclint`. If you have both a global install and a clone, note that
-`npx cclint` prefers whatever is already on your machine over the registry — so
-a stale global install will shadow a newer release without saying so. `cclint
---version` tells you which one you are actually running.
+`npx @santhosraj/cclint` prefers whatever is already on your machine over the
+registry — so a stale global install will shadow a newer release without saying
+so. `cclint --version` tells you which one you are actually running, and
+`npx @santhosraj/cclint@<version>` forces the registry.
 
 > **Quote paths containing spaces.** `--cwd "D:\my project"`, not `--cwd D:\my project`.
 > Unquoted, the shell splits the path and the flag receives only the first

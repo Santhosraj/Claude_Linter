@@ -56,7 +56,8 @@ jobs:
           npm pack --pack-destination "$RUNNER_TEMP" >/dev/null
           cd "$RUNNER_TEMP"
           npm init -y >/dev/null
-          npm install ./cclint-*.tgz >/dev/null
+          # Scoped packages pack as `santhosraj-cclint-<version>.tgz`.
+          npm install ./santhosraj-cclint-*.tgz >/dev/null
           # Explicit path, not `npx cclint`: npx prefers an already-installed
           # binary over the one just packed, so a bare call can report success
           # while testing something else entirely.

@@ -1,4 +1,4 @@
-# claude-config-lint
+# cclint
 
 Lint the configuration a Claude Code project accumulates — `CLAUDE.md`, hooks,
 MCP servers — for the failures that are silent until the agent starts behaving
@@ -13,9 +13,7 @@ npx cclint explain hooks.PreToolUse
 npx cclint budget
 ```
 
-`cclint` is a thin alias package; `npx claude-config-lint` is the same tool by
-its full name, and `npm install -g claude-config-lint` puts `cclint` on your
-`PATH` for good.
+`npm install -g cclint` puts it on your `PATH` for good.
 
 The default run is **fully offline, free, and fast**. No API key, no network.
 

@@ -1,6 +1,6 @@
-name: claude-config-lint
+name: cclint
 description: Lint CLAUDE.md, hooks, and MCP config for silent conflicts, dead references, and token bloat.
-author: claude-config-lint contributors
+author: cclint contributors
 
 branding:
   icon: alert-triangle
@@ -36,7 +36,7 @@ inputs:
     required: false
     default: "true"
   version:
-    description: npm version spec of claude-config-lint to run.
+    description: npm version spec of cclint to run.
     required: false
     default: latest
 
@@ -65,7 +65,7 @@ runs:
         [ -z "${ANTHROPIC_API_KEY:-}" ] && args+=(--offline)
 
         sarif="$RUNNER_TEMP/cclint.sarif"
-        npx --yes "claude-config-lint@${{ inputs.version }}" "${args[@]}" > "$sarif"
+        npx --yes "cclint@${{ inputs.version }}" "${args[@]}" > "$sarif"
         status=$?
 
         echo "sarif-file=$sarif" >> "$GITHUB_OUTPUT"
@@ -75,7 +75,7 @@ runs:
         text_args=(--fail-on="${{ inputs.fail-on }}")
         [ "${{ inputs.strict }}" = "true" ] && text_args+=(--strict)
         [ -z "${ANTHROPIC_API_KEY:-}" ] && text_args+=(--offline)
-        npx --yes "claude-config-lint@${{ inputs.version }}" "${text_args[@]}" || status=$?
+        npx --yes "cclint@${{ inputs.version }}" "${text_args[@]}" || status=$?
 
         exit $status
 

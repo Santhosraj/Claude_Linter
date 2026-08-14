@@ -56,6 +56,8 @@ jobs:
           npm pack --pack-destination "$RUNNER_TEMP" >/dev/null
           cd "$RUNNER_TEMP"
           npm init -y >/dev/null
-          npm install ./claude-config-lint-*.tgz >/dev/null
-          npx cclint --version
-          npx claude-config-lint --version
+          npm install ./cclint-*.tgz >/dev/null
+          # Explicit path, not `npx cclint`: npx prefers an already-installed
+          # binary over the one just packed, so a bare call can report success
+          # while testing something else entirely.
+          ./node_modules/.bin/cclint --version

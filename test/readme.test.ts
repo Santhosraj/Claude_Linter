@@ -44,11 +44,10 @@ describe("README", () => {
       readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
     ) as { devDependencies?: Record<string, string> };
 
-    const resolvable = new Set([
-      "claude-config-lint",
-      "cclint",
-      ...Object.keys(pkg.devDependencies ?? {}),
-    ]);
+    // `cclint` is the published name, and the only one. The core used to be
+    // `claude-config-lint` with `cclint` as a thin alias; that name belongs to an
+    // unrelated project on npm and was never available here.
+    const resolvable = new Set(["cclint", ...Object.keys(pkg.devDependencies ?? {})]);
 
     const invoked = [...readme.matchAll(/npx\s+(?:-p\s+\S+\s+)?([a-z0-9@/._-]+)/gi)].map(
       (m) => m[1]!,

@@ -1,11 +1,10 @@
 {
-  "name": "claude-config-lint",
+  "name": "cclint",
   "version": "0.2.0",
   "description": "Lint CLAUDE.md, hooks, and MCP config for silent conflicts, dead references, and token bloat.",
   "type": "module",
   "bin": {
-    "cclint": "dist/cli.js",
-    "claude-config-lint": "dist/cli.js"
+    "cclint": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -23,7 +22,6 @@
     "test:watch": "vitest",
     "conformance:record": "tsx scripts/record-conformance.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "sync:alias": "tsx scripts/sync-alias.ts",
     "prepublishOnly": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {

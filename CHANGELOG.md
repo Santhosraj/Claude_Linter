@@ -15,6 +15,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, a minor bump may change finding output.
 
+## [Unreleased]
+
+### Correctness
+
+- The `permissions/untrusted-workspace` finding no longer contradicts itself. It
+  fires on a gated `settings.local.json` while its own detail text told you
+  `settings.local.json` allow lists were unaffected — a leftover sentence from a
+  narrowing that was reverted once repeat probes showed the binary gates both
+  project files. The behaviour was always right; the sentence a user actually
+  reads was not. It now names both gated files, and a test asserts the wording.
+
+### Internal
+
+- Removed the raw NUL bytes from `src/rules/permissions.ts` and
+  `src/semantic/adjudicate.ts`. Both used one as a map-key or hash-key separator,
+  written as a literal control character rather than as an escape sequence.
+  Byte-identical at runtime — cached verdicts and token counts stay valid — but it
+  made ripgrep classify both files as binary and skip them, so a search across
+  `src/` silently excluded the largest rule file and the whole semantic shell. A
+  test now scans the tree for control bytes.
+
 ## [0.2.3] — 2026-08-17
 
 ### Correctness — three ways real conflicts were being discarded

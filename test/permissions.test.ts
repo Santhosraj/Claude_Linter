@@ -233,6 +233,15 @@ describe("rules end to end", () => {
     const trust = out.filter((d) => d.ruleId === "permissions/untrusted-workspace");
     expect(trust).toHaveLength(1);
     expect(trust[0]?.data?.["count"]).toBe(1);
+
+    // ...and the text must not contradict the gate. The reverted narrowing left
+    // behind a detail line promising that settings.local.json allow lists were
+    // unaffected, so this finding fired ON a local file while telling the reader
+    // local files were fine. Behaviour was right; the sentence was not, and only
+    // the sentence is what a user actually reads.
+    const detail = (trust[0]?.detail ?? []).join(" ");
+    expect(detail).not.toMatch(/settings\.local\.json allow lists/);
+    expect(detail).toMatch(/settings\.json and settings\.local\.json/);
   });
 
   it("does NOT gate the user's own allow list", () => {

@@ -79,7 +79,7 @@ export interface DoctorComplaint {
     | "other";
 }
 
-const ANSI = /\[[0-9;]*m/g;
+const ANSI = /\x1b\[[0-9;]*m/g;
 
 export function stripAnsi(s: string): string {
   return s.replace(ANSI, "");

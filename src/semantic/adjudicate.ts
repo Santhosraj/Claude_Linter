@@ -271,7 +271,7 @@ export class SemanticAdjudicator {
 /** Order-independent, so swapping A and B reuses the same cached verdict. */
 function cacheKey(model: string, pair: CandidatePair): string {
   const [x, y] = [pair.a.normalized, pair.b.normalized].sort();
-  return createHash("sha256").update(`${model} ${x} ${y}`).digest("hex").slice(0, 32);
+  return createHash("sha256").update(`${model}\u0000${x}\u0000${y}`).digest("hex").slice(0, 32);
 }
 
 function defaultCacheDir(): string {

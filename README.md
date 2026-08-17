@@ -397,7 +397,7 @@ nothing at all.
 ## GitHub Action
 
 ```yaml
-- uses: Santhosraj/Claude_Linter@v0.2.3   # or @main to track the branch
+- uses: Santhosraj/Claude_Linter@v0.2.4   # or @main to track the branch
   with:
     fail-on: error
     # Optional. Without it the action still runs fully; token figures
@@ -413,16 +413,16 @@ Emits SARIF, so findings render as inline annotations on the diff.
 repository, even from a tag or a commit SHA. Pin both to make a run reproducible:
 
 ```yaml
-- uses: Santhosraj/Claude_Linter@v0.2.3
+- uses: Santhosraj/Claude_Linter@v0.2.4
   with:
-    version: 0.2.3
+    version: 0.2.4
 ```
 
 **Reading the SARIF yourself.** The action uploads it for you by default. If you
 want the file, read the fixed path rather than the output:
 
 ```yaml
-- uses: Santhosraj/Claude_Linter@v0.2.3
+- uses: Santhosraj/Claude_Linter@v0.2.4
   continue-on-error: true
 - run: ./triage "$RUNNER_TEMP/cclint.sarif"
 ```

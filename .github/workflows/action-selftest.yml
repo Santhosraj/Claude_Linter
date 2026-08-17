@@ -120,18 +120,34 @@ jobs:
         if: always()
         run: test -s "$RUNNER_TEMP/cclint.sarif"
 
-      # Exactly one of B2a / B2b goes green, and which one tells us whether
-      # splitting enforcement into its own step made outputs propagate. Workflow
-      # logs need authentication to read; step names do not.
+      # Observational: exactly one of B2a / B2b RUNS and the other is reported
+      # skipped, which says whether splitting enforcement into its own step made
+      # outputs propagate on the failing path. Neither can fail the job. Workflow
+      # logs need authentication to read; step conclusions are public.
+      #
+      # Two earlier attempts at this probe failed, both instructive:
+      #
+      #   1. `continue-on-error: true` on a pass/fail pair. That flag reports a
+      #      FAILED step as `success`, so both steps showed green and the probe
+      #      carried no information at all.
+      #   2. Switching to `if:` but writing `steps.lint.outputs.sarif-file`.
+      #      That is valid inside `run:` — it is plain string interpolation —
+      #      but NOT inside an expression, where `-` is the subtraction
+      #      operator. GitHub rejected the whole file: the run existed with zero
+      #      jobs and its name showed as the path instead of `Action self-test`,
+      #      which is the signature of an unparseable workflow. Index syntax is
+      #      required for any output name containing a hyphen.
       - name: CHECK B2a — outputs.sarif-file DID propagate
-        if: always()
-        continue-on-error: true
-        run: test -n '${{ steps.lint.outputs.sarif-file }}'
+        if: ${{ always() && steps.lint.outputs['sarif-file'] != '' }}
+        # Block scalar, because `echo "propagated: x"` as a plain scalar puts a
+        # `: ` inside it and YAML reads that as a nested mapping.
+        run: |
+          echo "propagated -> '${{ steps.lint.outputs['sarif-file'] }}'"
 
       - name: CHECK B2b — outputs.sarif-file did NOT propagate
-        if: always()
-        continue-on-error: true
-        run: test -z '${{ steps.lint.outputs.sarif-file }}'
+        if: ${{ always() && steps.lint.outputs['sarif-file'] == '' }}
+        run: |
+          echo 'empty on the failing path; read $RUNNER_TEMP/cclint.sarif instead'
 
       - name: CHECK C — the SARIF names a json/* rule
         if: always()

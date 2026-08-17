@@ -42,15 +42,16 @@ that brevity at the cost of everything listed above.
 # 1. Set the version. This also COMMITS the bump and creates a `v<version>` tag —
 #    npm does both unless you pass --no-git-tag-version. Do not tag by hand
 #    afterwards; it already exists and `git tag` will refuse.
-npm version 0.2.1
+npm version <next>    # e.g. 0.2.5
 
 # 2. Full gate. prepublishOnly runs this again, but failing here is cheaper.
-npm run typecheck && npm test && npm run build
+#    test:strict, not test: it also asserts every suite in test/ actually ran.
+npm run typecheck && npm run test:strict && npm run build
 
 # 3. Re-derive the conformance recordings from the installed binary.
 #    Free — no API call. A behaviour change in Claude Code shows up here as a
 #    failing test with a readable diff rather than as a linter gone quietly wrong.
-npm run conformance:record && npm test
+npm run conformance:record && npm run test:strict
 
 # 4. Publish.
 npm publish

@@ -42,7 +42,12 @@ inputs:
 
 outputs:
   sarif-file:
-    description: Path to the generated SARIF file.
+    description: >
+      Path to the generated SARIF file. Available only when the action SUCCEEDS —
+      a composite action that exits non-zero does not export its outputs, and
+      this one exits non-zero whenever a finding meets `fail-on`. For a path that
+      survives a failing run, read the CCLINT_SARIF_FILE environment variable,
+      which the action also sets; it is always $RUNNER_TEMP/cclint.sarif.
     value: ${{ steps.run.outputs.sarif-file }}
 
 runs:
@@ -68,7 +73,20 @@ runs:
         npx --yes "@santhosraj/cclint@${{ inputs.version }}" "${args[@]}" > "$sarif"
         status=$?
 
+        # Published through BOTH channels, because they fail differently.
+        #
+        # A composite action that exits non-zero does not export its `outputs` to
+        # the caller — verified on a runner: with findings present the SARIF is
+        # written correctly and non-empty, and `steps.<id>.outputs.sarif-file`
+        # still comes back EMPTY. That loses the path in the one case a consumer
+        # wants it, since this step exits non-zero exactly when there is
+        # something to triage.
+        #
+        # A `$GITHUB_ENV` write persists to later caller steps regardless of this
+        # step's conclusion, so CCLINT_SARIF_FILE survives a failing run. The
+        # output is kept for callers already using it on the passing path.
         echo "sarif-file=$sarif" >> "$GITHUB_OUTPUT"
+        echo "CCLINT_SARIF_FILE=$sarif" >> "$GITHUB_ENV"
 
         # Re-run for a readable job log. Cheap: token counts are cached from
         # the pass above, and the deterministic checks are pure file I/O.

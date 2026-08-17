@@ -106,19 +106,34 @@ jobs:
           echo "outcome='${{ steps.lint.outcome }}'"
           test '${{ steps.lint.outcome }}' = 'failure'
 
-      - name: CHECK B — sarif-file output survived the failure
+      # The fix under test. A composite action that exits non-zero does not
+      # export its `outputs`, which was proven here: with findings present the
+      # SARIF was written and non-empty (CHECK D) while
+      # steps.lint.outputs.sarif-file came back EMPTY (this check, before the
+      # fix). A $GITHUB_ENV write survives the failure, so the path is still
+      # reachable in the one case a consumer wants it.
+      - name: CHECK B — CCLINT_SARIF_FILE survives a failing run
+        if: always()
+        run: |
+          echo "CCLINT_SARIF_FILE='${CCLINT_SARIF_FILE:-}'"
+          test -n "${CCLINT_SARIF_FILE:-}"
+          test -s "$CCLINT_SARIF_FILE"
+
+      # Pins the limitation rather than leaving it folklore: the output IS empty
+      # on the failing path. If GitHub ever changes that, this check fails and
+      # the README paragraph explaining the env var needs revisiting.
+      - name: CHECK B2 — and outputs.sarif-file is still empty there
+        if: always()
         run: |
           file='${{ steps.lint.outputs.sarif-file }}'
-          echo "sarif-file='${file}'"
-          # If this is the step that fails, a failing composite action does not
-          # export its outputs to the caller — which matters, because findings
-          # are exactly when a consumer wants the SARIF path.
-          test -n "$file"
+          echo "outputs.sarif-file='${file}'"
+          test -z "$file"
 
       - name: CHECK C — the SARIF names a json/* rule
+        if: always()
         run: |
           set -uo pipefail
-          file='${{ steps.lint.outputs.sarif-file }}'
+          file="${CCLINT_SARIF_FILE:-}"
           test -s "$file" || { echo "::error::file missing at $file"; ls -la "$(dirname "$file")" || true; exit 1; }
           head -c 400 "$file"; echo
           node -e '

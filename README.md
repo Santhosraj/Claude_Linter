@@ -365,8 +365,7 @@ capped** rather than reading as complete coverage.
 ## GitHub Action
 
 ```yaml
-# Pin to a release tag once one exists; `@main` always resolves.
-- uses: Santhosraj/Claude_Linter@main
+- uses: Santhosraj/Claude_Linter@v0.2.2   # or @main to track the branch
   with:
     fail-on: error
     # Optional. Without it the action still runs fully; token figures
@@ -375,6 +374,33 @@ capped** rather than reading as complete coverage.
 ```
 
 Emits SARIF, so findings render as inline annotations on the diff.
+
+**Pinning has two halves, and pinning the action is only one of them.** The
+`version` input defaults to `latest`, so the action installs the newest published
+`cclint` at run time — a run can change behaviour with no change to your
+repository, even from a tag or a commit SHA. Pin both to make a run reproducible:
+
+```yaml
+- uses: Santhosraj/Claude_Linter@v0.2.2
+  with:
+    version: 0.2.2
+```
+
+**Reading the SARIF yourself.** The action uploads it for you by default. If you
+want the file, prefer the environment variable over the output:
+
+```yaml
+- uses: Santhosraj/Claude_Linter@v0.2.2
+  id: lint
+  continue-on-error: true
+- run: ./triage "$CCLINT_SARIF_FILE"
+```
+
+`outputs.sarif-file` is populated only when the action **succeeds**. A composite
+action that exits non-zero does not export its outputs, and this one exits
+non-zero whenever a finding meets `fail-on` — so the output is empty in exactly
+the case where you wanted the path. `CCLINT_SARIF_FILE` is set through
+`$GITHUB_ENV` and survives a failing run; it is always `$RUNNER_TEMP/cclint.sarif`.
 
 ---
 

@@ -51,6 +51,12 @@ Start with `doctor`. It prints the project root, the marker that decided it, and
 every config file found — so you can confirm discovery is right before trusting
 any finding.
 
+`CLAUDE_CONFIG_DIR` is honoured, as Claude Code honours it: user settings, user
+memory and the `projects` trust store are all read from there instead of
+`~/.claude`. Worth knowing because the store moves *inside* that directory, where
+by default it sits beside it at `~/.claude.json` — and reading the wrong one makes
+a trusted workspace look untrusted.
+
 ---
 
 ## Why this exists

@@ -23,6 +23,13 @@ export interface DiscoveryOptions {
   projectRoot?: string;
   /** Override the home directory — used by fixtures to sandbox discovery. */
   home?: string;
+  /**
+   * Override the user config directory, as `CLAUDE_CONFIG_DIR` does at runtime.
+   * Set explicitly by fixtures so the recorder's own environment cannot leak in.
+   */
+  configDir?: string;
+  /** Environment to read `CLAUDE_CONFIG_DIR` from. Defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
   /** Override the enterprise managed-policy path. */
   managedPolicyPath?: string;
 }
@@ -88,6 +95,19 @@ export interface WorkspaceTrust {
    * `projectRoot`.
    */
   key?: string;
+  /** The trust store consulted — moves with `CLAUDE_CONFIG_DIR`. */
+  store?: string;
+  /**
+   * Whether that store existed at all.
+   *
+   * A missing store is a correct `trusted: false` — the binary gates project
+   * allow entries in exactly that situation, which the fixtures prove. But it is
+   * also the normal state in CI, a container, or a fresh checkout, where nobody
+   * has run Claude Code interactively. The finding is true there and reads as
+   * alarming, so it says which file was missing instead of implying the repo is
+   * misconfigured.
+   */
+  storeFound?: boolean;
 }
 
 export interface Discovery {
@@ -107,6 +127,49 @@ export interface Discovery {
   mcp: DiscoveredFile[];
   /** Directories scanned for skills/commands/agents, for the token report. */
   claudeDirs: string[];
+}
+
+/**
+ * Where the user-level config lives, honouring `CLAUDE_CONFIG_DIR`.
+ *
+ * Claude Code lets you relocate the whole user config directory, and cclint
+ * hardcoded `~/.claude` — so with the variable set it read a directory the
+ * runtime does not use. Every user-level answer was then wrong in the same
+ * direction: no user settings, no user memory, and — worst — no trust store,
+ * which reads as "this workspace has never been trusted" and fires the
+ * `permissions/untrusted-workspace` finding against a workspace that IS trusted.
+ *
+ * Verified against 2.1.229: with `CLAUDE_CONFIG_DIR=X`, `claude doctor` reports
+ * complaints from `X/settings.json`, and the binary both writes and names
+ * `X/.claude.json` as the trust store. So X REPLACES `~/.claude`, and the store —
+ * normally a sibling of that directory at `~/.claude.json` — moves inside it.
+ *
+ * The user `CLAUDE.md` path follows by the same substitution. That part is
+ * inferred from the rule rather than separately observed, because memory loading
+ * is not reported by any free oracle.
+ */
+export function configDirFor(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  const override = env["CLAUDE_CONFIG_DIR"];
+  if (typeof override === "string" && override.trim().length > 0) return resolve(override.trim());
+  return join(home, ".claude");
+}
+
+/**
+ * The `projects` trust store, which moves with `CLAUDE_CONFIG_DIR`.
+ *
+ * Default layout puts it OUTSIDE the config directory (`~/.claude.json` beside
+ * `~/.claude/`), so this cannot be derived by joining blindly — with an override
+ * it lands inside, without one it stays a sibling.
+ */
+export function trustStorePathFor(
+  home: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const override = env["CLAUDE_CONFIG_DIR"];
+  if (typeof override === "string" && override.trim().length > 0) {
+    return join(resolve(override.trim()), ".claude.json");
+  }
+  return join(home, ".claude.json");
 }
 
 /** Enterprise managed policy lives at a fixed OS-specific path. */
@@ -207,6 +270,14 @@ export function findProjectRootDetailed(start: string, home?: string): RootProve
 export function discover(options: DiscoveryOptions = {}): Discovery {
   const cwd = resolve(options.cwd ?? process.cwd());
   const home = resolve(options.home ?? homedir());
+  // Honours CLAUDE_CONFIG_DIR. Fixtures pass `configDir` explicitly so a
+  // developer's own environment variable cannot leak into a recorded expectation.
+  const configDir = options.configDir
+    ? resolve(options.configDir)
+    : configDirFor(home, options.env);
+  const trustStore = options.configDir
+    ? join(resolve(options.configDir), ".claude.json")
+    : trustStorePathFor(home, options.env);
   const rootProvenance: RootProvenance = options.projectRoot
     ? { root: resolve(options.projectRoot), source: "forced" }
     : findProjectRootDetailed(cwd, home);
@@ -233,7 +304,7 @@ export function discover(options: DiscoveryOptions = {}): Discovery {
     settings.push({ file, layer });
   };
 
-  push(join(home, ".claude", "settings.json"), "user");
+  push(join(configDir, "settings.json"), "user");
   push(join(projectRoot, ".claude", "settings.json"), "projectShared");
   push(join(projectRoot, ".claude", "settings.local.json"), "projectLocal");
 
@@ -254,7 +325,7 @@ export function discover(options: DiscoveryOptions = {}): Discovery {
     return;
   };
 
-  pushMemory(join(home, ".claude", "CLAUDE.md"), "user");
+  pushMemory(join(configDir, "CLAUDE.md"), "user");
   pushMemory(join(projectRoot, "CLAUDE.md"), "project");
   pushMemory(join(projectRoot, ".claude", "CLAUDE.md"), "project");
   pushMemory(join(projectRoot, "CLAUDE.local.md"), "project");
@@ -276,15 +347,15 @@ export function discover(options: DiscoveryOptions = {}): Discovery {
     mcp.push({ file, layer });
   };
   pushMcp(join(projectRoot, ".mcp.json"), "projectShared");
-  pushMcp(join(home, ".claude.json"), "user");
+  pushMcp(trustStore, "user");
 
-  const claudeDirs = [...new Set([join(home, ".claude"), join(projectRoot, ".claude")])].filter(
+  const claudeDirs = [...new Set([configDir, join(projectRoot, ".claude")])].filter(
     isDir,
   );
 
   return {
     projectRoot,
-    workspaceTrust: readWorkspaceTrust(home, projectRoot),
+    workspaceTrust: readWorkspaceTrust(trustStore, projectRoot),
     rootProvenance,
     startedFrom: cwd,
     home,
@@ -373,23 +444,28 @@ function findSubdirectoryMemory(root: string, maxDepth = 4): string[] {
  * for the same directory, so an exact string compare would report a trusted
  * workspace as untrusted roughly half the time.
  */
-export function readWorkspaceTrust(home: string, projectRoot: string): WorkspaceTrust {
+/**
+ * @param store Path to the `projects` trust store. Passed in rather than derived
+ *   from `home`, because `CLAUDE_CONFIG_DIR` relocates it — deriving it here is
+ *   what made cclint read a nonexistent file and report a trusted workspace as
+ *   untrusted.
+ */
+export function readWorkspaceTrust(store: string, projectRoot: string): WorkspaceTrust {
   // Trust is keyed on the git root, not on our project root. See WorkspaceTrust.
   const key = trustKeyFor(projectRoot);
-  const store = join(home, ".claude.json");
 
   // No store at all means no workspace has ever been trusted, which is a
   // definite `false` — and matches the binary, which ignores project allow
   // entries in exactly this situation. Only an unreadable or malformed store is
   // genuinely unknown; guessing there would risk telling someone their
   // permissions are being ignored when we simply could not tell.
-  if (!isFile(store)) return { trusted: false, key };
+  if (!isFile(store)) return { trusted: false, key, store, storeFound: false };
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(store, "utf8"));
   } catch {
-    return { trusted: undefined, key };
+    return { trusted: undefined, key, store, storeFound: true };
   }
 
   const projects =
@@ -399,7 +475,8 @@ export function readWorkspaceTrust(home: string, projectRoot: string): Workspace
 
   // A store with no projects map is well-formed and simply records no trusted
   // workspaces.
-  if (typeof projects !== "object" || projects === null) return { trusted: false, key };
+  if (typeof projects !== "object" || projects === null)
+    return { trusted: false, key, store, storeFound: true };
 
   const want = normalizeProjectKey(key);
   const matches: { candidate: string; flag: boolean }[] = [];
@@ -412,7 +489,7 @@ export function readWorkspaceTrust(home: string, projectRoot: string): Workspace
 
   // A project with no entry has never been opened interactively, so it has not
   // been trusted. That is a definite `false`, not an unknown.
-  if (matches.length === 0) return { trusted: false, key };
+  if (matches.length === 0) return { trusted: false, key, store, storeFound: true };
 
   /**
    * Duplicate keys for one directory can DISAGREE. A real store on the machine
@@ -427,9 +504,15 @@ export function readWorkspaceTrust(home: string, projectRoot: string): Workspace
    * which the permission rule already treats as "say nothing about trust".
    */
   const distinct = new Set(matches.map((m) => m.flag));
-  if (distinct.size > 1) return { trusted: undefined, key };
+  if (distinct.size > 1) return { trusted: undefined, key, store, storeFound: true };
 
-  return { trusted: matches[0]!.flag, matchedKey: matches[0]!.candidate, key };
+  return {
+    trusted: matches[0]!.flag,
+    matchedKey: matches[0]!.candidate,
+    key,
+    store,
+    storeFound: true,
+  };
 }
 
 /**

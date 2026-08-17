@@ -4,10 +4,12 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import {
+  configDirFor,
   discover,
   findProjectRoot,
   readWorkspaceTrust,
   trustKeyFor,
+  trustStorePathFor,
 } from "../src/discovery/layers.js";
 
 /**
@@ -88,11 +90,84 @@ describe("trustKeyFor", () => {
   });
 });
 
+/**
+ * `CLAUDE_CONFIG_DIR`.
+ *
+ * cclint hardcoded `~/.claude`, so with the variable set every user-level answer
+ * was wrong in the same direction: no user settings, no user memory, and no trust
+ * store — which reads as "never trusted" and fires
+ * `permissions/untrusted-workspace` against a workspace that IS trusted.
+ *
+ * Verified against 2.1.229: `claude doctor` reports complaints from
+ * `$CLAUDE_CONFIG_DIR/settings.json`, and the binary writes and names
+ * `$CLAUDE_CONFIG_DIR/.claude.json` as the store. The directory REPLACES
+ * `~/.claude`, and the store — normally its sibling — moves inside it.
+ */
+describe("CLAUDE_CONFIG_DIR", () => {
+  it("reads user settings from the relocated directory", () => {
+    const home = scratch();
+    const cfg = scratch();
+    const project = scratch();
+    writeFileSync(join(cfg, "settings.json"), JSON.stringify({ model: "from-config-dir" }));
+    // A decoy in the default location: if this is picked up, the override lost.
+    mkdirSync(join(home, ".claude"));
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ model: "from-home" }));
+
+    const d = discover({ cwd: project, projectRoot: project, home, configDir: cfg });
+    const user = d.settings.filter((s) => s.layer === "user").map((s) => s.file);
+
+    expect(user).toContain(join(cfg, "settings.json"));
+    expect(user).not.toContain(join(home, ".claude", "settings.json"));
+  });
+
+  it("finds the trust store inside it, not beside the home directory", () => {
+    const home = scratch();
+    const cfg = scratch();
+    const project = scratch();
+    mkdirSync(join(project, ".git"));
+    writeFileSync(
+      join(cfg, ".claude.json"),
+      JSON.stringify({
+        projects: { [project.split("\\").join("/")]: { hasTrustDialogAccepted: true } },
+      }),
+    );
+
+    const d = discover({ cwd: project, projectRoot: project, home, configDir: cfg });
+
+    // The whole point: trusted, not a false "never trusted".
+    expect(d.workspaceTrust.trusted).toBe(true);
+    expect(d.workspaceTrust.store).toBe(join(cfg, ".claude.json"));
+  });
+
+  it("reads it from the environment when not passed explicitly", () => {
+    const home = scratch();
+    const cfg = scratch();
+    expect(configDirFor(home, { CLAUDE_CONFIG_DIR: cfg })).toBe(cfg);
+    expect(trustStorePathFor(home, { CLAUDE_CONFIG_DIR: cfg })).toBe(join(cfg, ".claude.json"));
+  });
+
+  it("falls back to the default layout when unset or blank", () => {
+    const home = scratch();
+    for (const env of [{}, { CLAUDE_CONFIG_DIR: "   " }]) {
+      expect(configDirFor(home, env)).toBe(join(home, ".claude"));
+      // Note the store is a SIBLING of .claude here, not inside it.
+      expect(trustStorePathFor(home, env)).toBe(join(home, ".claude.json"));
+    }
+  });
+});
+
 describe("readWorkspaceTrust", () => {
+  /**
+   * Returns the STORE PATH, not a home directory. `readWorkspaceTrust` takes the
+   * store explicitly because `CLAUDE_CONFIG_DIR` relocates it — deriving it from
+   * `home` is what made cclint read a file that was not there and report a
+   * trusted workspace as untrusted.
+   */
   function storeWith(projects: unknown): string {
     const home = scratch();
-    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects }));
-    return home;
+    const store = join(home, ".claude.json");
+    writeFileSync(store, JSON.stringify({ projects }));
+    return store;
   }
 
   /**
@@ -136,7 +211,11 @@ describe("readWorkspaceTrust", () => {
 
   it("treats a missing store as untrusted, not unknown", () => {
     // Matches the binary, which gates allow entries in exactly this situation.
-    expect(readWorkspaceTrust(scratch(), scratch()).trusted).toBe(false);
+    const t = readWorkspaceTrust(join(scratch(), ".claude.json"), scratch());
+    expect(t.trusted).toBe(false);
+    // ...and says the store was absent, so the finding can explain itself in CI
+    // rather than implying the repository is misconfigured.
+    expect(t.storeFound).toBe(false);
   });
 });
 

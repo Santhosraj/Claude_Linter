@@ -315,6 +315,17 @@ deterministic core with an optional semantic shell:
 cclint --semantic
 ```
 
+> **This sends rule text off your machine.** `--semantic` is the only thing in
+> cclint that makes a network call for analysis, and what it transmits is the text
+> of the candidate rule pairs — excerpts of your `CLAUDE.md`, not the whole file
+> and no source code. The default destination is the Anthropic API; with
+> `--semantic-provider` it can instead be Gemini
+> (`generativelanguage.googleapis.com`), Groq (`api.groq.com`), OpenRouter
+> (`openrouter.ai`), or a local Ollama on `localhost:11434`. Verdicts are cached
+> to disk beside the rule text that produced them (`node_modules/.cache/cclint`,
+> or `os.tmpdir()/cclint` outside a Node project), owner-readable only. Nothing
+> here runs unless you pass the flag.
+
 1. A deterministic prefilter picks **candidate pairs** — rules sharing a known
    decision axis or enough topical vocabulary. Everything else never reaches a
    model. Pairs are ranked (an axis match beats vocabulary overlap; rare words
@@ -330,6 +341,27 @@ cclint --semantic
 
 Bounded by `--semantic-max-pairs` (default 40), and a capped run **says it was
 capped** rather than reading as complete coverage.
+
+**What the prefilter cannot reach — including this section's own example.** The
+judge only ever sees pairs the prefilter selected, and selection needs a shared
+axis or shared vocabulary. *"Prefer functional composition"* and *"model every
+domain concept as a class"* share neither: no axis covers them, and they have
+almost no words in common. So the contradiction this section opens with is one the
+pass will not currently find.
+
+Measured, not theorised: a fixture of five deliberate contradictions surfaced
+**two** candidate pairs. The three misses were the ones phrased in disjoint
+vocabulary — composition vs. classes, two-reviewer vs. self-merge, and
+no-comments vs. document-the-reasoning. `test/semantic.test.ts` asserts that
+2-of-5 figure, so this paragraph cannot quietly go stale.
+
+That is the honest boundary of a cheap deterministic prefilter: it buys a bounded
+model bill at the cost of recall on rules that disagree in meaning while sharing
+no surface. Widening it (embeddings, or a cheap first-pass triage over all pairs)
+is the obvious next step and is not implemented. Until it is, read a clean
+`--semantic` run as *"nothing found among the pairs it examined"*, and check the
+reported candidate-pair count — a run reporting `0 candidate pairs` examined
+nothing at all.
 
 ---
 
@@ -365,7 +397,7 @@ capped** rather than reading as complete coverage.
 ## GitHub Action
 
 ```yaml
-- uses: Santhosraj/Claude_Linter@v0.2.2   # or @main to track the branch
+- uses: Santhosraj/Claude_Linter@v0.2.3   # or @main to track the branch
   with:
     fail-on: error
     # Optional. Without it the action still runs fully; token figures
@@ -381,16 +413,16 @@ Emits SARIF, so findings render as inline annotations on the diff.
 repository, even from a tag or a commit SHA. Pin both to make a run reproducible:
 
 ```yaml
-- uses: Santhosraj/Claude_Linter@v0.2.2
+- uses: Santhosraj/Claude_Linter@v0.2.3
   with:
-    version: 0.2.2
+    version: 0.2.3
 ```
 
 **Reading the SARIF yourself.** The action uploads it for you by default. If you
 want the file, read the fixed path rather than the output:
 
 ```yaml
-- uses: Santhosraj/Claude_Linter@v0.2.2
+- uses: Santhosraj/Claude_Linter@v0.2.3
   continue-on-error: true
 - run: ./triage "$RUNNER_TEMP/cclint.sarif"
 ```

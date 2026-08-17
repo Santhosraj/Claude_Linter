@@ -9,9 +9,14 @@ name: Action self-test
 # `uses: ./` runs the action.yml in this checkout rather than a published copy,
 # so the file under review is the file under test.
 
+# Runs on every PR and every push to main, not just the branch it was developed
+# on. A workflow that only fires on a feature branch is dead YAML the moment that
+# branch is merged, and the action goes straight back to unverified — which is
+# how the argument-validation suite sat skipped in CI for weeks.
 on:
   push:
-    branches: [action-selftest]
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:

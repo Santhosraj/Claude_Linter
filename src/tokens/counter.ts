@@ -129,8 +129,15 @@ export class TokenCounter {
   flush(): void {
     if (!this.dirty) return;
     try {
-      mkdirSync(dirname(this.cacheFile), { recursive: true });
-      writeFileSync(this.cacheFile, JSON.stringify(this.diskCache), "utf8");
+      // Owner-only, for the same reason as the semantic cache: the fallback
+      // location is the shared `os.tmpdir()/cclint`. This file holds content
+      // hashes and counts rather than rule text, so the exposure is smaller —
+      // but it is the same directory and the same one-word fix.
+      mkdirSync(dirname(this.cacheFile), { recursive: true, mode: 0o700 });
+      writeFileSync(this.cacheFile, JSON.stringify(this.diskCache), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
       this.dirty = false;
     } catch {
       // A non-writable cache directory is not a lint failure.

@@ -200,6 +200,63 @@ describe("prefilter", () => {
     expect(significantTerms("write comments carefully")).toContain("comment");
     expect(significantTerms("write comment carefully")).toContain("comment");
   });
+
+  /**
+   * Pins the RECALL LIMIT the README documents, rather than asserting a success.
+   *
+   * A lexical prefilter can only surface pairs that share an axis or share
+   * vocabulary, so two rules that disagree in meaning while sharing no surface
+   * never reach the judge. This test exists so that limit stays a measured
+   * number in the docs instead of an estimate — and so improving the prefilter
+   * forces the README to be updated with it.
+   */
+  it("misses conflicts with no shared axis and no shared vocabulary (documented limit)", () => {
+    const planted: Array<[string, string]> = [
+      [
+        "Always prefer functional composition over inheritance for shared behaviour.",
+        "Always model every domain concept as a class with private state and public methods.",
+      ],
+      [
+        "Always write the test before the implementation.",
+        "Never block a change on tests; always ship the implementation first and add coverage later.",
+      ],
+      [
+        "Every change must be reviewed by two maintainers before merge.",
+        "You should merge your own small changes without waiting for a reviewer.",
+      ],
+      [
+        "Always let exceptions propagate to the top-level handler.",
+        "Never let an exception escape; always catch it and return a result object.",
+      ],
+      [
+        "Never write comments; the code must explain itself.",
+        "Always document the reasoning behind a non-obvious block with a comment.",
+      ],
+    ];
+
+    const rules = planted.flatMap(([a, b], i) => [
+      rule(a, "/p/CLAUDE.md", i * 4 + 3, [`Topic ${i + 1}`]),
+      rule(b, "/p/CLAUDE.md", i * 4 + 4, [`Topic ${i + 1}`]),
+    ]);
+
+    const pairs = buildCandidatePairs(rules, { axes: BUILTIN_AXES });
+    const surfaced = new Set(
+      pairs.map((p) => [p.a.normalized, p.b.normalized].sort().join("|")),
+    );
+    const reached = planted.filter(([a, b]) =>
+      surfaced.has([normalizeRule(a), normalizeRule(b)].sort().join("|")),
+    );
+
+    // 2 of 5 as measured on this fixture. Raise this number when the prefilter
+    // gets better, and update the README's "what it cannot reach" section too.
+    expect(reached).toHaveLength(2);
+
+    // The README opens the semantic section with the composition-vs-classes
+    // example, so it says outright that this exact pair is not reached.
+    expect(
+      surfaced.has([normalizeRule(planted[0]![0]), normalizeRule(planted[0]![1])].sort().join("|")),
+    ).toBe(false);
+  });
 });
 
 describe("axis classification", () => {

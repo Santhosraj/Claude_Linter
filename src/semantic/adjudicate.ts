@@ -245,8 +245,22 @@ export class SemanticAdjudicator {
   private flush(): void {
     if (!this.dirty) return;
     try {
-      mkdirSync(dirname(this.cacheFile), { recursive: true });
-      writeFileSync(this.cacheFile, JSON.stringify(this.cache), "utf8");
+      /**
+       * Owner-only, because this file holds the rule text from your CLAUDE.md
+       * next to each verdict. Under `node_modules/.cache` that hardly matters,
+       * but the fallback is `os.tmpdir()/cclint` — shared on a multi-user
+       * machine — and that is exactly where a GLOBAL install linting a non-Node
+       * project writes. Default modes there let another account read your
+       * instructions.
+       *
+       * The mode is a no-op on Windows, which has no POSIX bits. It costs
+       * nothing and is correct everywhere else.
+       */
+      mkdirSync(dirname(this.cacheFile), { recursive: true, mode: 0o700 });
+      writeFileSync(this.cacheFile, JSON.stringify(this.cache), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
       this.dirty = false;
     } catch {
       // A non-writable cache is not a lint failure.

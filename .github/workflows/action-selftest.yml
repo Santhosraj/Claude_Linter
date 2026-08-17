@@ -65,6 +65,56 @@ jobs:
             console.log("SARIF ok:", s.runs[0].tool.driver.name, s.runs[0].tool.driver.version ?? "");
           ' "$file"
 
+  pinned-version:
+    name: The pinned version input resolves from the registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The README tells people to pin BOTH halves — the action tag and the
+      # `version` input — and that input had never been exercised. Two things
+      # made it awkward, and both are solved here rather than documented away:
+      #
+      #   1. A pinned spec matching this repo's own package.json resolves to the
+      #      local unbuilt package instead of the registry (dist/ is gitignored,
+      #      so npx finds no cli.js). Fixed by pinning a PREVIOUSLY published
+      #      version: 0.2.3 can never equal the working version again.
+      #   2. npx walks up from the cwd to find a project. Fixed by putting the
+      #      fixture in RUNNER_TEMP, outside the checkout entirely — which is
+      #      also closer to what a consumer's repo looks like.
+      - name: Build a clean fixture outside the checkout
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/consumer/.claude"
+          echo '{ "model": "claude-opus-5" }' > "$RUNNER_TEMP/consumer/.claude/settings.json"
+          printf '# Consumer\n\n- Run the tests before committing.\n' > "$RUNNER_TEMP/consumer/CLAUDE.md"
+
+      - name: Run the action with an explicit version
+        id: lint
+        uses: ./
+        with:
+          working-directory: ${{ runner.temp }}/consumer
+          upload-sarif: "false"
+          version: 0.2.3
+
+      # The assertion that makes this job worth running: the SARIF must report
+      # 0.2.3, proving the pin was honoured. Without this the job would pass
+      # identically if `version` were ignored and `latest` installed instead.
+      - name: CHECK — the SARIF reports the pinned version, not latest
+        run: |
+          set -uo pipefail
+          file="$RUNNER_TEMP/cclint.sarif"
+          test -s "$file" || { echo "::error::no SARIF at $file"; exit 1; }
+          node -e '
+            const fs = require("fs");
+            const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const v = s.runs?.[0]?.tool?.driver?.version;
+            console.log("driver version:", v);
+            if (v !== "0.2.3") {
+              throw new Error(`version input was not honoured: SARIF says ${v}, expected 0.2.3`);
+            }
+          ' "$file"
+
   failing-project:
     name: Exits non-zero when an error-tier finding exists
     runs-on: ubuntu-latest

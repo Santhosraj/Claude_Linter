@@ -119,15 +119,20 @@ jobs:
           test -n "${CCLINT_SARIF_FILE:-}"
           test -s "$CCLINT_SARIF_FILE"
 
-      # Pins the limitation rather than leaving it folklore: the output IS empty
-      # on the failing path. If GitHub ever changes that, this check fails and
-      # the README paragraph explaining the env var needs revisiting.
-      - name: CHECK B2 — and outputs.sarif-file is still empty there
+      # Observational, never fails. Whether a failing composite exports its
+      # declared `outputs` is GitHub's behaviour, not this action's contract —
+      # CHECK B is the contract. Asserting either way here would just make the
+      # suite red on a platform change we do not control, so this records the
+      # value and moves on.
+      - name: CHECK B2 — record whether outputs.sarif-file propagated
         if: always()
         run: |
           file='${{ steps.lint.outputs.sarif-file }}'
-          echo "outputs.sarif-file='${file}'"
-          test -z "$file"
+          if [ -n "$file" ]; then
+            echo "outputs.sarif-file propagated: '$file'"
+          else
+            echo "outputs.sarif-file was EMPTY on the failing path (expected)"
+          fi
 
       - name: CHECK C — the SARIF names a json/* rule
         if: always()

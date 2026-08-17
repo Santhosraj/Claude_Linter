@@ -95,7 +95,15 @@ runs:
         [ -z "${ANTHROPIC_API_KEY:-}" ] && text_args+=(--offline)
         npx --yes "@santhosraj/cclint@${{ inputs.version }}" "${text_args[@]}" || status=$?
 
-        exit $status
+        # Deliberately exits 0 even when the lint found something. `fail-on` is
+        # enforced by the last step instead, and the reason is mechanical: the
+        # runner applies a step's $GITHUB_OUTPUT and $GITHUB_ENV files AFTER the
+        # step, and skips both when the step failed. Verified on a runner —
+        # exiting non-zero here left the SARIF written and non-empty while the
+        # caller saw neither `outputs.sarif-file` nor CCLINT_SARIF_FILE. Writing
+        # to both channels was not enough; the step itself has to succeed.
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        exit 0
 
     - name: Upload SARIF
       if: ${{ always() && inputs.upload-sarif == 'true' }}
@@ -103,3 +111,17 @@ runs:
       with:
         sarif_file: ${{ steps.run.outputs.sarif-file }}
         category: cclint
+
+    # Enforcement lives here so the step above can succeed and publish its
+    # output and env files. Fails the action with the linter's own exit code, so
+    # `fail-on` behaves exactly as before from the caller's point of view.
+    - name: Enforce fail-on
+      if: always()
+      shell: bash
+      run: |
+        code='${{ steps.run.outputs.status }}'
+        # An empty value means the step above died before recording a status,
+        # which is a tool failure rather than a clean pass.
+        [ -n "$code" ] || code=1
+        echo "cclint exit code: $code"
+        exit "$code"

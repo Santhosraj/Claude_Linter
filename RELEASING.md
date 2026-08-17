@@ -116,3 +116,9 @@ Pin the Claude Code version used to record conformance fixtures, and re-record o
 each of its releases. The tool's accuracy is bounded by how well its model of
 Claude Code matches the real binary, and that is the only mechanism that keeps
 the two in step.
+
+You no longer have to remember. `.github/workflows/conformance-drift.yml` asks npm
+weekly whether a newer Claude Code exists than the fixtures were recorded against,
+and opens a single tracking issue when one does — closing it again once you
+re-record. It detects the trigger, not the drift: the hook and runtime oracles need
+an authenticated binary, so re-recording still happens on your machine.

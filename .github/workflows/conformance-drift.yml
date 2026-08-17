@@ -1,0 +1,140 @@
+name: Conformance drift
+
+# The tool's accuracy is bounded by how closely its model of Claude Code matches
+# the shipping binary, and 29 of 32 merge rules are still `documented` or
+# `assumed`. The only mechanism keeping the two in step is someone remembering to
+# run `npm run conformance:record` — which is not a mechanism.
+#
+# So this asks npm, weekly, whether a newer Claude Code exists than the one the
+# fixtures were recorded against, and opens ONE tracking issue when it does.
+#
+# What it deliberately does NOT do: re-record. The hook and runtime oracles run
+# `claude -p` and `claude --debug`, which need an authenticated binary, so they
+# cannot run on a bare runner. This detects the TRIGGER for re-recording, and the
+# issue it opens says as much. A green run means "nobody needs to re-record yet",
+# never "behaviour is unchanged".
+#
+# Note for the future: GitHub disables scheduled workflows in a repository with
+# no commits for 60 days, and does so silently. If this stops reporting, that is
+# the first thing to check.
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC. Off the hour on purpose — scheduled runs bunch up at
+    # :00 across all of GitHub and get queued.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  # Also on any change to the checker itself. A schedule-only workflow cannot be
+  # verified until the schedule fires, which is how you end up shipping a broken
+  # cron and finding out in a month. This runs it the moment its own logic
+  # changes — the one time you most want to know it still works.
+  push:
+    paths:
+      - .github/workflows/conformance-drift.yml
+      - scripts/check-conformance-drift.mjs
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    name: Are the fixtures still current?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ask npm for the current Claude Code version
+        id: cc
+        run: |
+          set -euo pipefail
+          version="$(npm view @anthropic-ai/claude-code version)"
+          # An empty answer means the registry call failed. Reporting "no drift"
+          # off a failed lookup would be the worst possible outcome here.
+          test -n "$version" || { echo "::error::npm returned no version for @anthropic-ai/claude-code"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Claude Code latest on npm: $version"
+
+      - name: Compare against the recorded fixtures
+        id: drift
+        run: node scripts/check-conformance-drift.mjs "${{ steps.cc.outputs.version }}"
+
+      # One issue, not one per week. If a tracking issue is already open we leave
+      # it alone — a weekly comment saying the same thing is how people learn to
+      # ignore a bot.
+      - name: Open a tracking issue
+        if: steps.drift.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: Conformance fixtures need re-recording
+          RECORDED: ${{ steps.drift.outputs.recorded }}
+          CURRENT: ${{ steps.cc.outputs.version }}
+          SUMMARY: ${{ steps.drift.outputs.summary }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --json number,title \
+            --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)"
+          if [ -n "$existing" ]; then
+            echo "Issue #$existing is already open; not commenting again."
+            exit 0
+          fi
+          gh issue create --title "$TITLE" --body "$(cat <<EOF
+          $SUMMARY
+
+          | | version |
+          |---|---|
+          | recorded in fixtures | \`$RECORDED\` |
+          | current on npm | \`$CURRENT\` |
+
+          ### Why this matters
+
+          Every \`documented\`- and \`assumed\`-tier merge rule is a claim about how
+          Claude Code behaves. The conformance fixtures are the only thing that
+          checks those claims against the real binary, and they describe
+          \`$RECORDED\`. Until they are re-recorded, \`cclint doctor\` reports a
+          confidence tier derived from an older release.
+
+          ### What to run
+
+          On a machine with an authenticated Claude Code installed:
+
+          \`\`\`bash
+          npm run conformance:record
+          npm run test:strict
+          \`\`\`
+
+          A behaviour change shows up as a failing test with a readable diff. No
+          diff means the new release behaves the same, and the only change is the
+          version stamp — commit it anyway, so this stops firing.
+
+          ### Why this is not automated
+
+          The hook and runtime oracles invoke \`claude -p\` and \`claude --debug\`,
+          which need an authenticated binary. A bare runner cannot do it, so this
+          workflow detects the trigger rather than the drift.
+
+          _Opened automatically by \`.github/workflows/conformance-drift.yml\`._
+          EOF
+          )"
+
+      # Closes the loop: once someone re-records, the issue goes away by itself
+      # rather than lingering as stale noise.
+      - name: Close the tracking issue when back in sync
+        if: steps.drift.outputs.drift == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: Conformance fixtures need re-recording
+          CURRENT: ${{ steps.cc.outputs.version }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --json number,title \
+            --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)"
+          if [ -z "$existing" ]; then
+            echo "In sync, nothing open. Done."
+            exit 0
+          fi
+          gh issue close "$existing" --comment "Fixtures are recorded against Claude Code \`$CURRENT\`, which is current on npm. Closing automatically."

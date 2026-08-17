@@ -1,0 +1,96 @@
+name: Action self-test
+
+# The composite action had never been executed. Everything about it was
+# unverified: whether `npx --yes @santhosraj/cclint@<v>` resolves a SCOPED
+# package to a bin with a different name on a clean runner, whether the SARIF
+# redirect and the `sarif-file` output work, and whether the exit code actually
+# reflects `fail-on`. A green `npm test` says nothing about any of it.
+#
+# `uses: ./` runs the action.yml in this checkout rather than a published copy,
+# so the file under review is the file under test.
+
+on:
+  push:
+    branches: [action-selftest]
+  workflow_dispatch:
+
+jobs:
+  clean-project:
+    name: Exits 0 on a project with no findings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build a fixture with nothing wrong
+        run: |
+          mkdir -p fixture/.claude
+          cat > fixture/.claude/settings.json <<'JSON'
+          { "model": "claude-opus-5" }
+          JSON
+          cat > fixture/CLAUDE.md <<'MD'
+          # Fixture
+
+          - Run the test suite before committing.
+          MD
+
+      - name: Run the action
+        id: lint
+        uses: ./
+        with:
+          working-directory: fixture
+          upload-sarif: "false"
+
+      - name: The SARIF output must exist and parse
+        run: |
+          set -euo pipefail
+          file='${{ steps.lint.outputs.sarif-file }}'
+          test -n "$file" || { echo "::error::sarif-file output was empty"; exit 1; }
+          test -s "$file" || { echo "::error::SARIF file missing or empty: $file"; exit 1; }
+          node -e '
+            const s = require(process.argv[1]);
+            if (s.version !== "2.1.0") throw new Error("unexpected SARIF version: " + s.version);
+            if (!s.runs?.[0]?.tool?.driver?.name) throw new Error("no tool.driver.name in SARIF");
+            console.log("SARIF ok:", s.runs[0].tool.driver.name, s.runs[0].tool.driver.version ?? "");
+          ' "$file"
+
+  failing-project:
+    name: Exits non-zero when an error-tier finding exists
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build a fixture with a trailing comma, which Claude Code rejects
+        run: |
+          mkdir -p fixture/.claude
+          # A trailing comma makes Claude Code discard the whole file — an
+          # error-tier finding, so `fail-on: error` must fail the job.
+          printf '{ "model": "claude-opus-5", }\n' > fixture/.claude/settings.json
+
+      - name: Run the action (expected to fail)
+        id: lint
+        continue-on-error: true
+        uses: ./
+        with:
+          working-directory: fixture
+          upload-sarif: "false"
+          fail-on: error
+          # Pinned rather than `latest`, to prove the `version` input is honoured.
+          version: 0.2.2
+
+      - name: Assert it actually failed, and reported the right rule
+        run: |
+          set -euo pipefail
+          if [ '${{ steps.lint.outcome }}' != 'failure' ]; then
+            echo "::error::expected the action to fail on an error-tier finding, got '${{ steps.lint.outcome }}'"
+            exit 1
+          fi
+          file='${{ steps.lint.outputs.sarif-file }}'
+          test -s "$file" || { echo "::error::no SARIF written on the failing path"; exit 1; }
+          node -e '
+            const s = require(process.argv[1]);
+            const ids = (s.runs?.[0]?.results ?? []).map(r => r.ruleId);
+            console.log("rules reported:", ids.join(", ") || "(none)");
+            if (!ids.some(id => String(id).startsWith("json/"))) {
+              throw new Error("expected a json/* finding for the trailing comma");
+            }
+          ' "$file"

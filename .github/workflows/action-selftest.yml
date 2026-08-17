@@ -84,18 +84,31 @@ jobs:
           # Pinned rather than `latest`, to prove the `version` input is honoured.
           version: 0.2.2
 
-      - name: Assert it actually failed, and reported the right rule
+      # Deliberately three steps, not one script. Workflow logs need
+      # authentication to read, but per-step conclusions are public — so
+      # splitting the checks makes the step NAME carry the diagnosis. A single
+      # combined script just says "exit 1" and leaves you guessing which of
+      # "wrong outcome", "no output", or "wrong contents" it was.
+      - name: CHECK A — the action exited non-zero
+        run: |
+          echo "outcome='${{ steps.lint.outcome }}'"
+          test '${{ steps.lint.outcome }}' = 'failure'
+
+      - name: CHECK B — sarif-file output survived the failure
+        run: |
+          file='${{ steps.lint.outputs.sarif-file }}'
+          echo "sarif-file='${file}'"
+          # If this is the step that fails, a failing composite action does not
+          # export its outputs to the caller — which matters, because findings
+          # are exactly when a consumer wants the SARIF path.
+          test -n "$file"
+
+      - name: CHECK C — the SARIF names a json/* rule
         run: |
           set -uo pipefail
-          echo "action outcome: '${{ steps.lint.outcome }}'"
-          if [ '${{ steps.lint.outcome }}' != 'failure' ]; then
-            echo "::error::expected the action to fail on an error-tier finding, got '${{ steps.lint.outcome }}'"
-            exit 1
-          fi
           file='${{ steps.lint.outputs.sarif-file }}'
-          echo "sarif-file output: '${file}'"
-          test -s "$file" || { echo "::error::no SARIF written on the failing path"; exit 1; }
-          echo "--- first 400 bytes ---"; head -c 400 "$file"; echo
+          test -s "$file" || { echo "::error::file missing at $file"; ls -la "$(dirname "$file")" || true; exit 1; }
+          head -c 400 "$file"; echo
           node -e '
             const fs = require("fs");
             const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -105,3 +118,12 @@ jobs:
               throw new Error("expected a json/* finding for the trailing comma");
             }
           ' "$file"
+
+      # Independent of the caller-visible output: does the file the action wrote
+      # exist at the conventional path? Distinguishes "output not exported" from
+      # "SARIF never written".
+      - name: CHECK D — a SARIF exists in RUNNER_TEMP regardless of outputs
+        if: always()
+        run: |
+          ls -la "$RUNNER_TEMP" || true
+          test -s "$RUNNER_TEMP/cclint.sarif"

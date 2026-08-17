@@ -15,6 +15,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, a minor bump may change finding output.
 
+## [0.2.5] — 2026-08-17
+
+No behaviour change: `src/` is byte-identical to 0.2.4. This release exists so the
+npm page and the pinnable git tag carry the current docs and the current Action.
+
+### Documentation
+
+- The README leads with a real finding instead of 125 lines of prose — one `npx`
+  command and 18 lines of verbatim output showing a hook that never fires, two
+  `permissions.allow` entries Claude Code is ignoring, and a `CLAUDE.md`
+  contradiction. Plus npm, CI, self-test, and license badges.
+- `CONTRIBUTING.md` and a bug-report issue template, both of which make
+  *"what does Claude Code actually do here?"* the question they lead with.
+
+### GitHub Action
+
+- `github/codeql-action/upload-sarif` moved from v3 to v4. v3 declares
+  `using: node20`, which GitHub force-runs on node24 with a deprecation warning —
+  and that step runs in **your** job whenever `upload-sarif` is left at its
+  default, so the warning was being handed to consumers. Pin `@v0.2.5` or later to
+  get it. This repo's own workflows moved to `actions/checkout@v7` and
+  `actions/setup-node@v7` for the same reason.
+
 ## [0.2.4] — 2026-08-17
 
 Both fixes came out of running 0.2.3 against a real project and checking every
@@ -159,6 +182,7 @@ Initial public release: deterministic linting of `CLAUDE.md`, hooks, MCP
 servers, settings, and permissions, with SARIF output, a GitHub Action, and an
 opt-in semantic pass.
 
+[0.2.5]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.2.5
 [0.2.4]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.2.4
 [0.2.3]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.2.3
 [0.2.2]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.2.2

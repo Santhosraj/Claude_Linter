@@ -594,6 +594,131 @@ function splitFileList(list: string): string[] {
     .filter((f) => f.length > 0);
 }
 
+/**
+ * Result of the runtime-state oracle.
+ *
+ * The generalisation of the hook oracle, and the thing that unblocked the
+ * conformance ratio. A hook is a shell command executed inside the fully
+ * resolved runtime, before authentication and without an API call — so it can
+ * report not merely THAT it fired, but what the runtime resolved:
+ *
+ *   - `env` values, as the runtime injected them into the hook process. That
+ *     settles `env` merge semantics directly: a key set only by the user layer
+ *     surviving alongside project keys is possible only under a per-key merge.
+ *   - `permission_mode` from the hook's stdin payload, which is the effective
+ *     `permissions.defaultMode` after precedence is applied.
+ *
+ * Both were previously `documented` — believed from docs, unproven. Neither
+ * needed a new mechanism, only the realisation that the existing one could see
+ * more than it was being asked.
+ */
+export interface RuntimeOracleResult {
+  claudeVersion: string;
+  /** Environment as the hook process saw it, for the fixture's probe variables. */
+  env: Record<string, string>;
+  /** Effective `permissions.defaultMode`, absent if the payload omitted it. */
+  permissionMode?: string;
+}
+
+interface RuntimeProbe {
+  env: Record<string, string>;
+  permissionMode: string | undefined;
+}
+
+/**
+ * Run the fixture's probe hook and record what the runtime resolved.
+ *
+ * Three agreeing runs are required, for the same reason the trust oracle now
+ * demands them: a single reading here argues for changing a merge rule, and one
+ * unstable reading already caused exactly that mistake once.
+ */
+export function recordRuntimeOracle(
+  projectDir: string,
+  fakeHome: string,
+  repeats = 3,
+): RuntimeOracleResult {
+  const runs: RuntimeProbe[] = [];
+  for (let i = 0; i < repeats; i++) {
+    rmSync(join(fakeHome, ".claude.json"), { force: true });
+    runs.push(runRuntimeProbe(projectDir, fakeHome));
+  }
+
+  const signatures = runs.map((r) =>
+    JSON.stringify({
+      env: Object.fromEntries(Object.entries(r.env).sort(([a], [b]) => a.localeCompare(b))),
+      permissionMode: r.permissionMode ?? null,
+    }),
+  );
+  if (!signatures.every((s) => s === signatures[0])) {
+    throw new Error(
+      `Runtime oracle was not stable across ${repeats} runs in ${projectDir}.\n` +
+        runs.map((r, i) => `  run ${i + 1}: ${signatures[i]}`).join("\n") +
+        "\nRefusing to record a flaky expectation.",
+    );
+  }
+
+  const first = runs[0]!;
+  return {
+    claudeVersion: claudeVersion(),
+    env: first.env,
+    ...(first.permissionMode ? { permissionMode: first.permissionMode } : {}),
+  };
+}
+
+function runRuntimeProbe(projectDir: string, fakeHome: string): RuntimeProbe {
+  const envLog = join(projectDir, ".envlog");
+  const stdinLog = join(projectDir, ".stdinlog");
+  rmSync(envLog, { force: true });
+  rmSync(stdinLog, { force: true });
+
+  try {
+    execFileSync("claude", ["-p", "conformance-probe"], {
+      cwd: projectDir,
+      encoding: "utf8",
+      env: sandboxEnv(fakeHome),
+      timeout: 120_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    // Exits non-zero once it cannot authenticate, which is after the hooks ran.
+  }
+
+  const env: Record<string, string> = {};
+  let permissionMode: string | undefined;
+
+  if (existsSync(envLog)) {
+    for (const line of readFileSync(envLog, "utf8").split(/\r?\n/)) {
+      const m = /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(line.trim());
+      if (m?.[1] !== undefined) env[m[1]] = m[2] ?? "";
+    }
+  }
+
+  if (existsSync(stdinLog)) {
+    try {
+      const payload = JSON.parse(readFileSync(stdinLog, "utf8")) as {
+        permission_mode?: unknown;
+      };
+      if (typeof payload.permission_mode === "string") permissionMode = payload.permission_mode;
+    } catch {
+      // A truncated payload is a failed probe, caught by the emptiness check below.
+    }
+  }
+
+  rmSync(envLog, { force: true });
+  rmSync(stdinLog, { force: true });
+
+  if (Object.keys(env).length === 0 && permissionMode === undefined) {
+    throw new Error(
+      `Runtime oracle observed nothing in ${projectDir}. Refusing to record an ` +
+        "empty expectation — it would make the conformance test pass vacuously.\n" +
+        "The fixture needs a UserPromptSubmit hook that writes `NAME=VALUE` lines to " +
+        "$CLAUDE_PROJECT_DIR/.envlog, or pipes its stdin to $CLAUDE_PROJECT_DIR/.stdinlog.",
+    );
+  }
+
+  return { env, permissionMode };
+}
+
 export function recordOracle(projectDir: string, fakeHome: string): OracleResult {
   const output = runMcpList(projectDir, fakeHome);
   const servers = parseMcpList(output);

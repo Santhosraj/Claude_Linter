@@ -1,0 +1,18 @@
+{
+  "env": {
+    "CCLINT_BOTH": "projectShared",
+    "CCLINT_PROJECT_ONLY": "projectShared"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf 'CCLINT_BOTH=%s\\nCCLINT_PROJECT_ONLY=%s\\nCCLINT_USER_ONLY=%s\\n' \"$CCLINT_BOTH\" \"$CCLINT_PROJECT_ONLY\" \"$CCLINT_USER_ONLY\" >> \"$CLAUDE_PROJECT_DIR/.envlog\""
+          }
+        ]
+      }
+    ]
+  }
+}

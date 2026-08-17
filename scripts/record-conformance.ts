@@ -18,7 +18,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { recordDoctorOracle, recordHookOracle, recordOracle, recordTrustOracle } from "./oracle.js";
+import {
+  recordDoctorOracle,
+  recordHookOracle,
+  recordOracle,
+  recordRuntimeOracle,
+  recordTrustOracle,
+} from "./oracle.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesRoot = resolve(here, "..", "test", "fixtures");
@@ -45,6 +51,18 @@ const FAKE_HOME_KEEP = new Set(["settings.json", "settings.local.json", "CLAUDE.
  */
 function cleanFakeHome(fakeHome: string): void {
   rmSync(join(fakeHome, ".claude.json"), { force: true });
+
+  /**
+   * The allowlist was applied only INSIDE `.claude/`, leaving the fake home's own
+   * root unguarded — so a recording run on Windows left an `AppData/` directory
+   * behind, because USERPROFILE points here and the OS scaffolds into it. Harmless
+   * today (it contained no files, and git does not track empty directories) but it
+   * is the exact failure the comment above claims to have solved, one level up.
+   */
+  for (const entry of readdirSync(fakeHome)) {
+    if (entry === ".claude" || entry === ".claude.json") continue;
+    rmSync(join(fakeHome, entry), { recursive: true, force: true });
+  }
 
   const claudeDir = join(fakeHome, ".claude");
   if (!existsSync(claudeDir)) return;
@@ -118,6 +136,16 @@ function main(): number {
             `ok (claude ${result.claudeVersion}, ignored: ` +
               result.ignoredAllow.map((i) => `${i.count} in ${i.files.join(" + ")}`).join("; ") +
               ")\n",
+          );
+        } else if (oracle === "runtime") {
+          const result = recordRuntimeOracle(dir, fakeHome);
+          write(dir, "runtime.json", result);
+          const env = Object.entries(result.env)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ");
+          process.stdout.write(
+            `ok (claude ${result.claudeVersion}, mode=${result.permissionMode ?? "-"}` +
+              `${env ? `, ${env}` : ""})\n`,
           );
         } else if (oracle === "hooks") {
           const result = recordHookOracle(dir, fakeHome, spec.event ?? "UserPromptSubmit");

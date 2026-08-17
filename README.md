@@ -274,16 +274,30 @@ linter that has quietly gone wrong.
 
 **Confidence tiers.** Every merge rule is tagged `conformance` (proven against
 the binary), `documented`, or `assumed`. Findings that depend on an `assumed`
-rule are automatically demoted in severity and say so. `cclint doctor`
-reports the ratio; the goal is to drive it to all-`conformance`.
+rule are automatically demoted in severity and say so. `cclint doctor` reports
+the ratio.
 
 A rule cannot be promoted by editing a label: `conformance` requires naming the
 fixtures that prove it, and a meta-test asserts those fixtures exist and carry
-recordings. Currently **1 of 32** rules is conformance-tier — `hooks`, the one
-whose blast radius is highest, since getting it wrong means telling users to
-delete hooks that are running. 13 are `documented` and 18 `assumed`; `cclint
-doctor` prints the live breakdown, and that number is the honest measure of how
-far this has to go.
+recordings. Currently **3 of 32** rules is conformance-tier; 11 are `documented`
+and 18 `assumed`, and `cclint doctor` prints the live breakdown.
+
+*What the three are, and how they got there.* `hooks` came first, being the rule
+whose blast radius is highest — getting it wrong means telling users to delete
+hooks that are running. `env` and `permissions.defaultMode` followed once it
+became clear the hook oracle had been under-used: a hook is a shell command
+running inside the fully resolved runtime, before authentication and with no API
+call, so it can report what that runtime *decided*, not merely that it fired. It
+prints the environment it was handed, and its stdin payload carries the effective
+`permission_mode`. No new mechanism was needed.
+
+*And why "all-`conformance`" is not the goal.* Some rules cannot be proven this
+way at any price: `permissions.allow` / `.deny` / `.ask` are only observable
+through a real tool-use decision, which means the model, which means a billed API
+call — so a free, replayable fixture cannot exist for them. Several cosmetic
+scalars surface in no oracle at all. Reading `3/32` as "9% done" is therefore
+wrong in a way that undersells the ceiling: roughly a third of the table is
+reachable, and that is the number worth driving up.
 
 **Severity policy.** `error` is reserved for what we can prove from the bytes on
 disk. Anything depending on the environment is `warning`; anything semantic is

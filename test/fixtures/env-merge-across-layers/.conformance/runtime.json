@@ -1,0 +1,8 @@
+{
+  "claudeVersion": "2.1.233",
+  "env": {
+    "CCLINT_BOTH": "projectShared",
+    "CCLINT_PROJECT_ONLY": "projectShared",
+    "CCLINT_USER_ONLY": "user"
+  }
+}

@@ -8,6 +8,7 @@ import type {
   DoctorOracleResult,
   HookOracleResult,
   OracleResult,
+  RuntimeOracleResult,
   TrustOracleResult,
 } from "../scripts/oracle.js";
 
@@ -49,6 +50,13 @@ function doctorFixtures(): string[] {
   );
 }
 
+function runtimeFixtures(): string[] {
+  if (!existsSync(fixturesRoot)) return [];
+  return readdirSync(fixturesRoot).filter((name) =>
+    existsSync(join(fixturesRoot, name, ".conformance", "runtime.json")),
+  );
+}
+
 function trustFixtures(): string[] {
   if (!existsSync(fixturesRoot)) return [];
   return readdirSync(fixturesRoot).filter((name) =>
@@ -60,6 +68,7 @@ const fixtures = recordedFixtures();
 const hooks = hookFixtures();
 const doctors = doctorFixtures();
 const trusts = trustFixtures();
+const runtimes = runtimeFixtures();
 
 /**
  * Workspace-trust conformance.
@@ -443,6 +452,118 @@ describe.skipIf(hooks.length === 0)("hook conformance", () => {
         // prove nothing about merge behaviour.
         expect(new Set(recorded.executed).size).toBeGreaterThan(1);
       });
+    });
+  }
+});
+
+/**
+ * Runtime-state conformance — what the binary actually resolved.
+ *
+ * The hook oracle proved only that hooks fire. But a hook is a shell command
+ * running inside the fully resolved runtime, before authentication and with no
+ * API call, so it can report what that runtime decided: the environment it
+ * injected, and the `permission_mode` in its stdin payload.
+ *
+ * That is what promoted `env` and `permissions.defaultMode` off `documented`.
+ * Neither needed a new mechanism — only noticing the existing one could see more
+ * than it was being asked. Both were previously believed from documentation,
+ * which is exactly the tier that produced a live false positive in the trust rule.
+ */
+describe.skipIf(runtimes.length === 0)("runtime-state conformance", () => {
+  for (const name of runtimes) {
+    const dir = join(fixturesRoot, name);
+    const recorded = JSON.parse(
+      readFileSync(join(dir, ".conformance", "runtime.json"), "utf8"),
+    ) as RuntimeOracleResult;
+
+    describe(name, () => {
+      const analyzeFixture = () =>
+        analyze({
+          cwd: dir,
+          home: join(dir, ".fake-home"),
+          configDir: join(dir, ".fake-home", ".claude"),
+          managedPolicyPath: join(dir, "__no_such_policy__.json"),
+          skipBudget: true,
+        });
+
+      it.skipIf(Object.keys(recorded.env).length === 0)(
+        "resolves every env var to the value the runtime injected",
+        async () => {
+          const result = await analyzeFixture();
+
+          const mismatches: string[] = [];
+          for (const [name, value] of Object.entries(recorded.env)) {
+            const key = result.context.keys.find((k) => k.path === `env.${name}`);
+            if (!key) {
+              mismatches.push(`env.${name}: runtime had "${value}", cclint resolved no such key`);
+              continue;
+            }
+            if (key.effective !== value) {
+              mismatches.push(
+                `env.${name}: runtime had "${value}", cclint says "${String(key.effective)}"`,
+              );
+            }
+          }
+          expect(mismatches).toEqual([]);
+        },
+      );
+
+      it.skipIf(Object.keys(recorded.env).length === 0)(
+        "records a shape that proves per-key merging rather than replacement",
+        () => {
+          // Guards the fixture. If a later edit leaves only keys that both layers
+          // set, the recording still passes while proving nothing: wholesale
+          // replacement and per-key merge are indistinguishable without a key that
+          // ONLY the lower-precedence layer sets.
+          const user = JSON.parse(
+            readFileSync(join(dir, ".fake-home", ".claude", "settings.json"), "utf8"),
+          ) as { env?: Record<string, string> };
+          const project = JSON.parse(
+            readFileSync(join(dir, ".claude", "settings.json"), "utf8"),
+          ) as { env?: Record<string, string> };
+
+          const userOnly = Object.keys(user.env ?? {}).filter((k) => !(k in (project.env ?? {})));
+          expect(userOnly.length).toBeGreaterThan(0);
+
+          // ...and that key must have survived in the recording.
+          for (const k of userOnly) expect(recorded.env[k]).toBe(user.env?.[k]);
+
+          // A collided key must exist too, or precedence is untested.
+          const collided = Object.keys(project.env ?? {}).filter((k) => k in (user.env ?? {}));
+          expect(collided.length).toBeGreaterThan(0);
+          for (const k of collided) expect(recorded.env[k]).toBe(project.env?.[k]);
+        },
+      );
+
+      it.skipIf(recorded.permissionMode === undefined)(
+        "resolves permissions.defaultMode to the mode the runtime reported",
+        async () => {
+          const result = await analyzeFixture();
+          const key = result.context.keys.find((k) => k.path === "permissions.defaultMode");
+
+          expect(key, "resolver produced no permissions.defaultMode key").toBeDefined();
+          expect(key!.effective).toBe(recorded.permissionMode);
+        },
+      );
+
+      it.skipIf(recorded.permissionMode === undefined)(
+        "records a mode that differs between layers, so precedence is proven",
+        () => {
+          // Both layers setting the same mode would pass whatever the rule was.
+          const user = JSON.parse(
+            readFileSync(join(dir, ".fake-home", ".claude", "settings.json"), "utf8"),
+          ) as { permissions?: { defaultMode?: string } };
+          const project = JSON.parse(
+            readFileSync(join(dir, ".claude", "settings.json"), "utf8"),
+          ) as { permissions?: { defaultMode?: string } };
+
+          expect(user.permissions?.defaultMode).toBeDefined();
+          expect(project.permissions?.defaultMode).toBeDefined();
+          expect(user.permissions?.defaultMode).not.toBe(project.permissions?.defaultMode);
+          // The higher-precedence layer is the one that won.
+          expect(recorded.permissionMode).toBe(project.permissions?.defaultMode);
+        },
+      );
     });
   }
 });

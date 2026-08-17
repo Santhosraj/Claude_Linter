@@ -1,0 +1,6 @@
+{
+  "env": {
+    "CCLINT_BOTH": "user",
+    "CCLINT_USER_ONLY": "user"
+  }
+}

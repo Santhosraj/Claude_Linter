@@ -106,8 +106,13 @@ export const MERGE_RULES: MergeRule[] = [
   {
     path: "permissions.defaultMode",
     strategy: "override",
-    confidence: "documented",
+    confidence: "conformance",
     note: "Scalar mode; the highest-precedence layer that sets it wins.",
+    // Proven against the real binary: the fixture sets a DIFFERENT mode in the
+    // user and project layers, and a UserPromptSubmit hook reports the
+    // `permission_mode` the runtime resolved in its stdin payload. The project
+    // value is what comes back, so precedence is observed rather than assumed.
+    provenance: ["permissions-default-mode-override"],
   },
   {
     path: "permissions.disableBypassPermissionsMode",
@@ -122,10 +127,19 @@ export const MERGE_RULES: MergeRule[] = [
   {
     path: "env",
     strategy: "deepMerge",
-    confidence: "documented",
+    confidence: "conformance",
     note:
       "Env vars merge per-key: a project layer setting FOO does not clear a " +
       "user layer's BAR. Only same-key collisions resolve by precedence.",
+    /**
+     * Proven against the real binary. A hook runs inside the resolved runtime, so
+     * it can print the environment it was actually given — and the fixture is
+     * built so the recording alone distinguishes the two candidate rules: a key
+     * set ONLY by the user layer survives alongside project keys, which is
+     * impossible if a higher layer replaced the whole `env` object. A collided key
+     * resolves to the project value, which pins precedence.
+     */
+    provenance: ["env-merge-across-layers"],
   },
   {
     path: "enabledPlugins",

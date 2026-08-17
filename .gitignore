@@ -26,3 +26,7 @@ test/fixtures/**/.hooklog
 #   test/fixtures/**/.oracle.json
 # and the fixtures need their own local settings layer to test against:
 #   test/fixtures/**/settings.local.json
+
+# Vitest JSON report, written by `npm run test:strict` to verify that every
+# suite actually ran. Regenerated per run; never an artifact.
+.vitest/

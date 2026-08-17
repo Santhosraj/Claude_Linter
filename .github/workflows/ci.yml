@@ -72,7 +72,13 @@ jobs:
 
       # Replays the recorded conformance corpus. Needs neither the Claude Code
       # binary nor network access — re-recording is a separate, manual step.
-      - run: npm test
+      #
+      # `test:strict`, not `test`: it additionally asserts that every suite on
+      # disk appears in the run report. The forks pool can lose a worker under
+      # load — observed locally as `spawn UNKNOWN` and `kill EPERM` — and one such
+      # run printed "Test Files 16 passed (16)" and exited 0 while a suite never
+      # executed. A green tick covering less than yesterday is worse than a red one.
+      - run: npm run test:strict
 
       # The tool must survive being pointed at its own repository.
       - name: Self-lint

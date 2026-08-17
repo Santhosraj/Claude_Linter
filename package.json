@@ -26,7 +26,8 @@
     "test:watch": "vitest",
     "conformance:record": "tsx scripts/record-conformance.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run test:strict && npm run build",
+    "test:strict": "vitest run --reporter=default --reporter=json --outputFile.json=.vitest/collection.json && node scripts/assert-test-collection.mjs .vitest/collection.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

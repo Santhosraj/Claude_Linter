@@ -42,12 +42,19 @@ jobs:
 
       - name: The SARIF output must exist and parse
         run: |
-          set -euo pipefail
+          set -uo pipefail
           file='${{ steps.lint.outputs.sarif-file }}'
+          echo "sarif-file output: '${file}'"
           test -n "$file" || { echo "::error::sarif-file output was empty"; exit 1; }
-          test -s "$file" || { echo "::error::SARIF file missing or empty: $file"; exit 1; }
+          test -s "$file" || { echo "::error::SARIF file missing or empty: $file"; ls -la "$(dirname "$file")" || true; exit 1; }
+          echo "--- first 400 bytes ---"; head -c 400 "$file"; echo
+          # JSON.parse, not require(): require() treats an unknown extension as
+          # JavaScript, so a .sarif file throws a SyntaxError before any assertion
+          # runs. That bug failed this job on the first attempt and said nothing
+          # about the action.
           node -e '
-            const s = require(process.argv[1]);
+            const fs = require("fs");
+            const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
             if (s.version !== "2.1.0") throw new Error("unexpected SARIF version: " + s.version);
             if (!s.runs?.[0]?.tool?.driver?.name) throw new Error("no tool.driver.name in SARIF");
             console.log("SARIF ok:", s.runs[0].tool.driver.name, s.runs[0].tool.driver.version ?? "");
@@ -79,15 +86,19 @@ jobs:
 
       - name: Assert it actually failed, and reported the right rule
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          echo "action outcome: '${{ steps.lint.outcome }}'"
           if [ '${{ steps.lint.outcome }}' != 'failure' ]; then
             echo "::error::expected the action to fail on an error-tier finding, got '${{ steps.lint.outcome }}'"
             exit 1
           fi
           file='${{ steps.lint.outputs.sarif-file }}'
+          echo "sarif-file output: '${file}'"
           test -s "$file" || { echo "::error::no SARIF written on the failing path"; exit 1; }
+          echo "--- first 400 bytes ---"; head -c 400 "$file"; echo
           node -e '
-            const s = require(process.argv[1]);
+            const fs = require("fs");
+            const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
             const ids = (s.runs?.[0]?.results ?? []).map(r => r.ruleId);
             console.log("rules reported:", ids.join(", ") || "(none)");
             if (!ids.some(id => String(id).startsWith("json/"))) {

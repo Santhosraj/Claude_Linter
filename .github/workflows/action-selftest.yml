@@ -81,8 +81,20 @@ jobs:
           working-directory: fixture
           upload-sarif: "false"
           fail-on: error
-          # Pinned rather than `latest`, to prove the `version` input is honoured.
-          version: 0.2.2
+          # NOT pinned, and the reason is worth recording: a pinned spec cannot
+          # be self-tested from inside this repo. Proven on the runner —
+          # `npx @santhosraj/cclint@0.2.2` FAILS inside the checkout and SUCCEEDS
+          # outside it, while `@latest` succeeds in both. This repo's own
+          # package.json is named @santhosraj/cclint at that exact version with
+          # `bin.cclint -> dist/cli.js`, and dist/ is gitignored, so a matching
+          # pinned spec resolves to the local unbuilt package and finds no
+          # cli.js. `latest` cannot be satisfied locally, so it goes to the
+          # registry.
+          #
+          # That is an artifact of the package testing itself, not a defect: a
+          # consumer's package.json has a different name, so a pinned version
+          # fetches from the registry as intended. The `version` input therefore
+          # stays untested here by design.
 
       # Deliberately three steps, not one script. Workflow logs need
       # authentication to read, but per-step conclusions are public — so
@@ -131,56 +143,3 @@ jobs:
       - name: CHECK D1 — the SARIF file exists at all (even if empty)
         if: always()
         run: test -f "$RUNNER_TEMP/cclint.sarif"
-
-      # D and D1 together say whether the redirect ran but captured nothing. The
-      # probes below then reproduce the action's own commands directly, so the
-      # cause is attributed rather than inferred: E is npx resolving the pinned
-      # scoped package, F is the SARIF run, G is the exit code being 1 (findings)
-      # rather than 2 (the tool itself failed). CHECK A only proved "non-zero",
-      # which a crash satisfies too.
-      - name: CHECK E — npx can resolve the pinned scoped package
-        if: always()
-        working-directory: fixture
-        run: npx --yes "@santhosraj/cclint@0.2.2" --version
-
-      - name: CHECK F — the SARIF run writes non-empty stdout
-        if: always()
-        working-directory: fixture
-        run: |
-          set -uo pipefail
-          npx --yes "@santhosraj/cclint@0.2.2" --format=sarif --offline > probe.sarif
-          echo "exit=$?  bytes=$(wc -c < probe.sarif)"
-          test -s probe.sarif
-
-      - name: CHECK G — that run exits 1 (findings), not 2 (tool failure)
-        if: always()
-        working-directory: fixture
-        run: |
-          set -uo pipefail
-          npx --yes "@santhosraj/cclint@0.2.2" --format=sarif --offline > /dev/null
-          code=$?
-          echo "exit code was $code"
-          test "$code" = "1"
-
-      # E failed inside the checkout while job 1's `@latest` succeeded from the
-      # same place. The suspect is this repo's own package.json: it is named
-      # `@santhosraj/cclint` at version 0.2.2 with `bin.cclint -> dist/cli.js`,
-      # and `dist/` is gitignored, so a fresh checkout has no such file. A pinned
-      # spec that MATCHES the local version may resolve to the local, unbuilt
-      # package, where `latest` cannot be satisfied locally and goes to the
-      # registry.
-      #
-      # H versus E is the discriminator, and it is only answerable on a runner —
-      # reproducing this locally is impossible because a global install shadows
-      # npx. H passing while E fails means location-dependent resolution (the
-      # collision is real). H failing too means the pinned spec is broken
-      # everywhere and the local package is irrelevant.
-      - name: CHECK H — the same pinned spec works OUTSIDE the checkout
-        if: always()
-        working-directory: ${{ runner.temp }}
-        run: npx --yes "@santhosraj/cclint@0.2.2" --version
-
-      - name: CHECK I — `latest` works INSIDE the checkout
-        if: always()
-        working-directory: fixture
-        run: npx --yes "@santhosraj/cclint@latest" --version

@@ -127,3 +127,37 @@ jobs:
         run: |
           ls -la "$RUNNER_TEMP" || true
           test -s "$RUNNER_TEMP/cclint.sarif"
+
+      - name: CHECK D1 — the SARIF file exists at all (even if empty)
+        if: always()
+        run: test -f "$RUNNER_TEMP/cclint.sarif"
+
+      # D and D1 together say whether the redirect ran but captured nothing. The
+      # probes below then reproduce the action's own commands directly, so the
+      # cause is attributed rather than inferred: E is npx resolving the pinned
+      # scoped package, F is the SARIF run, G is the exit code being 1 (findings)
+      # rather than 2 (the tool itself failed). CHECK A only proved "non-zero",
+      # which a crash satisfies too.
+      - name: CHECK E — npx can resolve the pinned scoped package
+        if: always()
+        working-directory: fixture
+        run: npx --yes "@santhosraj/cclint@0.2.2" --version
+
+      - name: CHECK F — the SARIF run writes non-empty stdout
+        if: always()
+        working-directory: fixture
+        run: |
+          set -uo pipefail
+          npx --yes "@santhosraj/cclint@0.2.2" --format=sarif --offline > probe.sarif
+          echo "exit=$?  bytes=$(wc -c < probe.sarif)"
+          test -s probe.sarif
+
+      - name: CHECK G — that run exits 1 (findings), not 2 (tool failure)
+        if: always()
+        working-directory: fixture
+        run: |
+          set -uo pipefail
+          npx --yes "@santhosraj/cclint@0.2.2" --format=sarif --offline > /dev/null
+          code=$?
+          echo "exit code was $code"
+          test "$code" = "1"

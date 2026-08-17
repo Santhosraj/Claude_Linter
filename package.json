@@ -1,6 +1,6 @@
 {
   "name": "@santhosraj/cclint",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Lint CLAUDE.md, hooks, and MCP config for silent conflicts, dead references, and token bloat.",
   "type": "module",
   "bin": {

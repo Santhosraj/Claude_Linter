@@ -33,6 +33,12 @@ that brevity at the cost of everything listed above.
 ## Steps
 
 ```bash
+# 0. Write the CHANGELOG entry and bump the version pins in the README's GitHub
+#    Action snippets, THEN commit — before `npm version`, so the release commit
+#    and its tag contain the notes for that release rather than trailing it. The
+#    changelog ships in the tarball (`files` lists it explicitly; npm guarantees
+#    only README and LICENSE).
+
 # 1. Set the version. This also COMMITS the bump and creates a `v<version>` tag —
 #    npm does both unless you pass --no-git-tag-version. Do not tag by hand
 #    afterwards; it already exists and `git tag` will refuse.

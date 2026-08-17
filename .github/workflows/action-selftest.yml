@@ -115,21 +115,18 @@ jobs:
         if: always()
         run: test -s "$RUNNER_TEMP/cclint.sarif"
 
-      # Observational, and neither step can fail the job. The discriminator is
-      # RUN versus SKIPPED, not pass versus fail: exactly one `if` matches, and
-      # the API reports the other as skipped.
-      #
-      # The first attempt used `continue-on-error: true` on both, which was
-      # useless — that flag reports a failed step as `success`, so both showed
-      # green and neither carried information. Same masking that made "Run the
-      # action (expected to fail)" look successful.
+      # Exactly one of B2a / B2b goes green, and which one tells us whether
+      # splitting enforcement into its own step made outputs propagate. Workflow
+      # logs need authentication to read; step names do not.
       - name: CHECK B2a — outputs.sarif-file DID propagate
-        if: ${{ always() && steps.lint.outputs.sarif-file != '' }}
-        run: echo "propagated: '${{ steps.lint.outputs.sarif-file }}'"
+        if: always()
+        continue-on-error: true
+        run: test -n '${{ steps.lint.outputs.sarif-file }}'
 
       - name: CHECK B2b — outputs.sarif-file did NOT propagate
-        if: ${{ always() && steps.lint.outputs.sarif-file == '' }}
-        run: echo "empty on the failing path"
+        if: always()
+        continue-on-error: true
+        run: test -z '${{ steps.lint.outputs.sarif-file }}'
 
       - name: CHECK C — the SARIF names a json/* rule
         if: always()

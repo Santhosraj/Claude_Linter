@@ -24,6 +24,16 @@ on:
     # :00 across all of GitHub and get queued.
     - cron: "17 6 * * 1"
   workflow_dispatch:
+    inputs:
+      simulate-drift:
+        description: >
+          Force the drift path, to prove issue creation works. Opens a REAL issue
+          whose version reads 0.0.0-simulated; the next ordinary run closes it
+          automatically. Use this once — the alerting path is otherwise only
+          exercised the first time it genuinely matters, which is the worst moment
+          to discover a permissions problem.
+        type: boolean
+        default: false
   # Also on any change to the checker itself. A schedule-only workflow cannot be
   # verified until the schedule fires, which is how you end up shipping a broken
   # cron and finding out in a month. This runs it the moment its own logic
@@ -61,7 +71,18 @@ jobs:
 
       - name: Compare against the recorded fixtures
         id: drift
-        run: node scripts/check-conformance-drift.mjs "${{ steps.cc.outputs.version }}"
+        env:
+          NPM_VERSION: ${{ steps.cc.outputs.version }}
+          SIMULATE: ${{ inputs.simulate-drift }}
+        run: |
+          set -euo pipefail
+          version="$NPM_VERSION"
+          # Empty on schedule and push, where `inputs` does not exist at all.
+          if [ "${SIMULATE:-false}" = "true" ]; then
+            version="0.0.0-simulated"
+            echo "::warning::Simulating drift against $version to exercise the alert path."
+          fi
+          node scripts/check-conformance-drift.mjs "$version"
 
       # One issue, not one per week. If a tracking issue is already open we leave
       # it alone — a weekly comment saying the same thing is how people learn to

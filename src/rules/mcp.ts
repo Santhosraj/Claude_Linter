@@ -25,7 +25,9 @@ import type { Diagnostic, Position } from "../model/types.js";
  * sdk"). An earlier hand-written version of this set omitted `ws`, `sdk`, and
  * `streamable-http`, so cclint reported three legitimate transports as unknown.
  *
- * Verified against Claude Code 2.1.224.
+ * No version is quoted here on purpose: `test/fixtures/sample-project` records
+ * the binary's own verdicts along with the version they came from, and a
+ * hand-copied number in a comment only drifts from it.
  */
 const VALID_TYPES = new Set(["stdio", "sse", "http", "streamable-http", "ws", "sdk"]);
 

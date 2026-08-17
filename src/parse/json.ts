@@ -8,8 +8,9 @@
  * But leniency must not become tolerance. Claude Code parses its settings files
  * as STRICT JSON: a single `//` comment or trailing comma makes it discard the
  * entire file, silently, taking every setting in it with it. Verified against
- * `claude doctor` on 2.1.224, which reports "Invalid or malformed JSON" for
- * both.
+ * `claude doctor`, which reports "Invalid or malformed JSON" for both — see the
+ * recorded complaints in each fixture's `.conformance/doctor.json`, which also
+ * carry the version they came from.
  *
  * So we read the file leniently and then report the extensions as an error.
  * Staying quiet here would be the worst possible outcome: cclint would parse a

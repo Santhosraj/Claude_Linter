@@ -30,10 +30,15 @@ import { SEVERITY, type RuleContext } from "./context.js";
  * This matters more than it looks. An earlier version of this list had 9 events
  * against the real 31, so cclint reported 22 perfectly valid hook events as
  * "this hook will never fire" — telling users to delete working config, which is
- * the single most damaging thing this tool could do. The conformance fixture
- * `settings-unknown-hook-event` now pins it against the binary.
+ * the single most damaging thing this tool could do. The conformance fixtures
+ * `sample-project` and `settings-malformed-hooks` now pin it against the binary,
+ * via their recorded `Valid events:` list.
  *
- * Verified against Claude Code 2.1.224.
+ * The version this was last checked against is NOT repeated here: those
+ * recordings carry it, `npm run conformance:record` keeps them current, and a
+ * hand-written copy in a comment only rots. It had already drifted — this block
+ * claimed 2.1.224 while the recordings had moved on, and named a fixture
+ * (`settings-unknown-hook-event`) that does not exist.
  */
 export const KNOWN_EVENTS = new Set([
   "PreToolUse",

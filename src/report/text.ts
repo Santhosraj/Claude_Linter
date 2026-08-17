@@ -83,9 +83,16 @@ export function renderBudget(budget: BudgetReport, root: string): string {
   section("On demand", onDemand, "costs nothing until invoked");
 
   lines.push(pc.bold("Per-turn floor"));
+  // "an assumed N-token window" when the model was not recognised. The share is
+  // only as good as the denominator, and a wrong denominator is invisible in a
+  // percentage — a 200K guess against a real 1M window overstates it fivefold.
+  const windowLabel = budget.contextWindowKnown === false ? "an assumed " : "a ";
   lines.push(
     `  ${tilde}${budget.perTurnTotal.toLocaleString()} tokens ` +
-      pc.dim(`(${pct(budget.perTurnTotal)}% of a ${budget.contextWindow.toLocaleString()}-token window)`),
+      pc.dim(
+        `(${pct(budget.perTurnTotal)}% of ${windowLabel}` +
+          `${budget.contextWindow.toLocaleString()}-token window)`,
+      ),
   );
   lines.push(
     pc.dim(
@@ -98,6 +105,21 @@ export function renderBudget(budget: BudgetReport, root: string): string {
       `  ${tilde}${budget.onDemand.toLocaleString()} more is reachable on demand and is NOT counted above.`,
     ),
   );
+
+  if (budget.contextWindowKnown === false) {
+    lines.push("");
+    lines.push(
+      pc.yellow(
+        `  ! ${budget.model ?? "This model"} is not in cclint's context-window table,`,
+      ),
+    );
+    lines.push(
+      pc.dim(
+        `    so the percentage above assumes ${budget.contextWindow.toLocaleString()} tokens.\n` +
+          "    Set `contextWindow` in .cclint.json, or --context-window, to correct it.",
+      ),
+    );
+  }
 
   if (budget.degradedReason) {
     lines.push("");

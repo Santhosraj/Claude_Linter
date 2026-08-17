@@ -19,8 +19,8 @@ import { buildCandidatePairs } from "./semantic/prefilter.js";
 import {
   buildBudget,
   budgetDiagnostics,
-  contextWindowFor,
   expandImports,
+  resolveContextWindow,
   type BudgetReport,
 } from "./tokens/budget.js";
 import { TokenCounter } from "./tokens/counter.js";
@@ -260,8 +260,7 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
           .filter((m) => m.layer === "subdirectory")
           .map((m) => m.file),
         claudeDirs: discovery.claudeDirs,
-        contextWindow:
-          options.contextWindow ?? config.contextWindow ?? contextWindowFor(model),
+        ...windowFor(model, options.contextWindow ?? config.contextWindow),
       },
       counter,
     );
@@ -275,6 +274,27 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
   for (const d of filtered) counts[d.severity]++;
 
   return { diagnostics: filtered, budget, context: ctx, config, counts, semantic };
+}
+
+/**
+ * The context window to report against, and whether it is actually known.
+ *
+ * An explicit `--context-window` or `.cclint.json` value is authoritative and
+ * never flagged as assumed — the user has told us. Otherwise the window is
+ * derived from the model, and an unrecognised model is reported as a guess
+ * rather than presented as fact.
+ */
+function windowFor(
+  model: string,
+  explicit: number | undefined,
+): { contextWindow: number; contextWindowKnown?: boolean; model: string } {
+  if (explicit !== undefined) return { contextWindow: explicit, model };
+  const resolved = resolveContextWindow(model);
+  return {
+    contextWindow: resolved.tokens,
+    ...(resolved.known ? {} : { contextWindowKnown: false }),
+    model,
+  };
 }
 
 function labelFor(layer: string, file: string, root: string): string {

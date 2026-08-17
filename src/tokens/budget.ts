@@ -48,6 +48,10 @@ export interface BudgetReport {
   /** alwaysLoaded + metadataOnly — the true per-turn floor. */
   perTurnTotal: number;
   contextWindow: number;
+  /** False when `contextWindow` was assumed because the model was unrecognised. */
+  contextWindowKnown?: boolean;
+  /** The model the window was resolved from. */
+  model?: string;
   degradedReason?: string | undefined;
 }
 
@@ -130,13 +134,65 @@ export function budgetDiagnostics(report: BudgetReport, projectRoot: string): Di
   ];
 }
 
-/** Context windows we know. Used only to render a percentage. */
-export function contextWindowFor(model: string): number {
+/**
+ * Context windows, by model. Used only to render the per-turn floor as a
+ * percentage of the window.
+ *
+ * Ordered, first match wins, and deliberately a table rather than one regex: the
+ * previous single expression omitted `claude-mythos-5` (1M), which silently
+ * resolved to the 200K fallback and inflated every reported share fivefold.
+ *
+ * A `[1m]` suffix is a deployment variant of a 1M model rather than a model ID —
+ * it appears in real user settings (`opus[1m]`), so it is matched explicitly. The
+ * bare-`1m` substring the old code also accepted is gone: it would match any
+ * future ID containing those characters.
+ */
+const CONTEXT_WINDOWS: { pattern: RegExp; tokens: number }[] = [
+  { pattern: /\[1m\]/, tokens: 1_000_000 },
+  // Haiku is checked before the 1M families so a future `haiku` variant cannot
+  // fall through to them.
+  { pattern: /haiku/, tokens: 200_000 },
+  { pattern: /fable-5|mythos-5|opus-5|sonnet-5/, tokens: 1_000_000 },
+  { pattern: /opus-4-[678]|sonnet-4-6/, tokens: 1_000_000 },
+];
+
+/**
+ * What cclint assumes when it does not recognise the model.
+ *
+ * 200K is the smaller of the two live windows, so an unknown model's share is
+ * over-reported rather than under-reported — the safer direction for a number
+ * whose purpose is to make cost visible. It is still a guess, which is why
+ * `resolveContextWindow` reports whether it was used.
+ */
+const ASSUMED_CONTEXT_WINDOW = 200_000;
+
+export interface ResolvedContextWindow {
+  tokens: number;
+  /** False when the model matched no entry and the fallback was assumed. */
+  known: boolean;
+}
+
+/**
+ * Resolve a model's context window, saying whether it was actually known.
+ *
+ * The distinction matters in both directions, and cclint could previously report
+ * neither. A model released after this table was written falls to 200K and its
+ * share is overstated; meanwhile a project that sets no `model` at all is
+ * analysed as the 1M default, so someone genuinely running Haiku sees a share
+ * five times too small. Labelling the assumption is the honest fix — inventing a
+ * more elaborate guess is not.
+ */
+export function resolveContextWindow(model: string): ResolvedContextWindow {
   const m = model.toLowerCase();
-  if (m.includes("[1m]") || m.includes("1m")) return 1_000_000;
-  if (m.includes("haiku")) return 200_000;
-  if (/opus-5|sonnet-5|fable-5|opus-4-[678]|sonnet-4-6/.test(m)) return 1_000_000;
-  return 200_000;
+  for (const { pattern, tokens } of CONTEXT_WINDOWS) {
+    if (pattern.test(m)) return { tokens, known: true };
+  }
+  return { tokens: ASSUMED_CONTEXT_WINDOW, known: false };
+}
+
+/** Context window in tokens. Prefer `resolveContextWindow` — it reports guesses. */
+export function contextWindowFor(model: string): number {
+  return resolveContextWindow(model).tokens;
 }
 
 export interface BuildBudgetInput {
@@ -147,6 +203,13 @@ export interface BuildBudgetInput {
   subdirectoryMemory: string[];
   claudeDirs: string[];
   contextWindow: number;
+  /**
+   * False when `contextWindow` is the assumed fallback rather than a known
+   * value. Reported so the percentage can say so instead of implying certainty.
+   */
+  contextWindowKnown?: boolean;
+  /** The model the window was resolved from, for the caveat text. */
+  model?: string;
 }
 
 export async function buildBudget(
@@ -258,6 +321,8 @@ export async function buildBudget(
     onDemand,
     perTurnTotal: alwaysLoaded + metadataOnly,
     contextWindow: input.contextWindow,
+    ...(input.contextWindowKnown === false ? { contextWindowKnown: false } : {}),
+    ...(input.model ? { model: input.model } : {}),
     degradedReason: counter.degradedReason,
   };
 }

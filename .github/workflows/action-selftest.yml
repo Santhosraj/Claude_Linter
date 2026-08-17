@@ -24,7 +24,7 @@ jobs:
     name: Exits 0 on a project with no findings
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build a fixture with nothing wrong
         run: |
@@ -69,7 +69,7 @@ jobs:
     name: The pinned version input resolves from the registry
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The README tells people to pin BOTH halves — the action tag and the
       # `version` input — and that input had never been exercised. Two things
@@ -119,7 +119,7 @@ jobs:
     name: Exits non-zero when an error-tier finding exists
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build a fixture with a trailing comma, which Claude Code rejects
         run: |

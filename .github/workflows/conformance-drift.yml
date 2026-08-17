@@ -103,8 +103,9 @@ jobs:
           SUMMARY: ${{ steps.drift.outputs.summary }}
         run: |
           set -euo pipefail
-          existing="$(gh issue list --state open --json number,title \
-            --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)"
+          existing="$(gh issue list --state open --limit 100 --json number,title \
+            --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')"
+          echo "existing open tracking issue: ${existing:-none}"
           if [ -n "$existing" ]; then
             echo "Issue #$existing is already open; not commenting again."
             exit 0
@@ -158,8 +159,16 @@ jobs:
           CURRENT: ${{ steps.drift.outputs.current }}
         run: |
           set -euo pipefail
-          existing="$(gh issue list --state open --json number,title \
-            --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)"
+          # No `| head -1`, and the title comes from `env.TITLE` inside jq rather
+          # than being interpolated into the program text. The previous version
+          # did both and failed on its first real exercise: with an issue actually
+          # open, gh wrote a line, `head` closed the pipe, and `pipefail` failed
+          # the whole pipeline before `gh issue close` ever ran — so the create
+          # path was proven while the cleanup path was silently broken. `.[0]`
+          # does the job head was doing, inside a single process.
+          existing="$(gh issue list --state open --limit 100 --json number,title \
+            --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')"
+          echo "existing open tracking issue: ${existing:-none}"
           if [ -z "$existing" ]; then
             echo "In sync, nothing open. Done."
             exit 0

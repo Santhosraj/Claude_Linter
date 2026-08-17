@@ -161,3 +161,26 @@ jobs:
           code=$?
           echo "exit code was $code"
           test "$code" = "1"
+
+      # E failed inside the checkout while job 1's `@latest` succeeded from the
+      # same place. The suspect is this repo's own package.json: it is named
+      # `@santhosraj/cclint` at version 0.2.2 with `bin.cclint -> dist/cli.js`,
+      # and `dist/` is gitignored, so a fresh checkout has no such file. A pinned
+      # spec that MATCHES the local version may resolve to the local, unbuilt
+      # package, where `latest` cannot be satisfied locally and goes to the
+      # registry.
+      #
+      # H versus E is the discriminator, and it is only answerable on a runner —
+      # reproducing this locally is impossible because a global install shadows
+      # npx. H passing while E fails means location-dependent resolution (the
+      # collision is real). H failing too means the pinned spec is broken
+      # everywhere and the local package is irrelevant.
+      - name: CHECK H — the same pinned spec works OUTSIDE the checkout
+        if: always()
+        working-directory: ${{ runner.temp }}
+        run: npx --yes "@santhosraj/cclint@0.2.2" --version
+
+      - name: CHECK I — `latest` works INSIDE the checkout
+        if: always()
+        working-directory: fixture
+        run: npx --yes "@santhosraj/cclint@latest" --version

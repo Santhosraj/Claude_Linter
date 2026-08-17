@@ -93,7 +93,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TITLE: Conformance fixtures need re-recording
           RECORDED: ${{ steps.drift.outputs.recorded }}
-          CURRENT: ${{ steps.cc.outputs.version }}
+          # The version actually COMPARED, from the drift step — not the raw npm
+          # answer from the step above. Under `simulate-drift` those differ, and
+          # the first real test of this path produced a body whose summary said
+          # "npm ships 0.0.0-simulated" while the table below it said 2.1.233.
+          # Only reachable under simulation, but a self-contradicting issue body
+          # is exactly what makes people stop trusting an automated report.
+          CURRENT: ${{ steps.drift.outputs.current }}
           SUMMARY: ${{ steps.drift.outputs.summary }}
         run: |
           set -euo pipefail
@@ -149,7 +155,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TITLE: Conformance fixtures need re-recording
-          CURRENT: ${{ steps.cc.outputs.version }}
+          CURRENT: ${{ steps.drift.outputs.current }}
         run: |
           set -euo pipefail
           existing="$(gh issue list --state open --json number,title \

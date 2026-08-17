@@ -106,39 +106,33 @@ jobs:
           echo "outcome='${{ steps.lint.outcome }}'"
           test '${{ steps.lint.outcome }}' = 'failure'
 
-      # The fix under test. A composite action that exits non-zero does not
-      # export its `outputs`, which was proven here: with findings present the
-      # SARIF was written and non-empty (CHECK D) while
-      # steps.lint.outputs.sarif-file came back EMPTY (this check, before the
-      # fix). A $GITHUB_ENV write survives the failure, so the path is still
-      # reachable in the one case a consumer wants it.
-      - name: CHECK B — CCLINT_SARIF_FILE survives a failing run
+      # The contract the action actually promises for a failing run: the SARIF is
+      # at a fixed path, needing no propagation mechanism. Two attempts to make
+      # propagation work failed on a runner — outputs are not exported when the
+      # action fails, and a $GITHUB_ENV write from inside a composite did not
+      # reach the caller either — so the documented path is the guarantee.
+      - name: CHECK B — the documented fixed path is readable by the caller
         if: always()
-        run: |
-          echo "CCLINT_SARIF_FILE='${CCLINT_SARIF_FILE:-}'"
-          test -n "${CCLINT_SARIF_FILE:-}"
-          test -s "$CCLINT_SARIF_FILE"
+        run: test -s "$RUNNER_TEMP/cclint.sarif"
 
-      # Observational, never fails. Whether a failing composite exports its
-      # declared `outputs` is GitHub's behaviour, not this action's contract —
-      # CHECK B is the contract. Asserting either way here would just make the
-      # suite red on a platform change we do not control, so this records the
-      # value and moves on.
-      - name: CHECK B2 — record whether outputs.sarif-file propagated
+      # Exactly one of B2a / B2b goes green, and which one tells us whether
+      # splitting enforcement into its own step made outputs propagate. Workflow
+      # logs need authentication to read; step names do not.
+      - name: CHECK B2a — outputs.sarif-file DID propagate
         if: always()
-        run: |
-          file='${{ steps.lint.outputs.sarif-file }}'
-          if [ -n "$file" ]; then
-            echo "outputs.sarif-file propagated: '$file'"
-          else
-            echo "outputs.sarif-file was EMPTY on the failing path (expected)"
-          fi
+        continue-on-error: true
+        run: test -n '${{ steps.lint.outputs.sarif-file }}'
+
+      - name: CHECK B2b — outputs.sarif-file did NOT propagate
+        if: always()
+        continue-on-error: true
+        run: test -z '${{ steps.lint.outputs.sarif-file }}'
 
       - name: CHECK C — the SARIF names a json/* rule
         if: always()
         run: |
           set -uo pipefail
-          file="${CCLINT_SARIF_FILE:-}"
+          file="$RUNNER_TEMP/cclint.sarif"
           test -s "$file" || { echo "::error::file missing at $file"; ls -la "$(dirname "$file")" || true; exit 1; }
           head -c 400 "$file"; echo
           node -e '

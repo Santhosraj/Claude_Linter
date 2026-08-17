@@ -387,20 +387,20 @@ repository, even from a tag or a commit SHA. Pin both to make a run reproducible
 ```
 
 **Reading the SARIF yourself.** The action uploads it for you by default. If you
-want the file, prefer the environment variable over the output:
+want the file, read the fixed path rather than the output:
 
 ```yaml
 - uses: Santhosraj/Claude_Linter@v0.2.2
-  id: lint
   continue-on-error: true
-- run: ./triage "$CCLINT_SARIF_FILE"
+- run: ./triage "$RUNNER_TEMP/cclint.sarif"
 ```
 
-`outputs.sarif-file` is populated only when the action **succeeds**. A composite
-action that exits non-zero does not export its outputs, and this one exits
-non-zero whenever a finding meets `fail-on` — so the output is empty in exactly
-the case where you wanted the path. `CCLINT_SARIF_FILE` is set through
-`$GITHUB_ENV` and survives a failing run; it is always `$RUNNER_TEMP/cclint.sarif`.
+`outputs.sarif-file` is best-effort: outputs are not reliably exported when the
+action fails, and the action fails whenever a finding meets `fail-on` — so the
+output can be empty in exactly the case where you wanted the path. The file is
+always written to `$RUNNER_TEMP/cclint.sarif`, which needs no propagation
+mechanism and was verified on a runner to be present and non-empty on a failing
+run.
 
 ---
 

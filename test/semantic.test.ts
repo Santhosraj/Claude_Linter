@@ -66,6 +66,39 @@ describe("prefilter", () => {
     expect(buildCandidatePairs(rules, { axes: BUILTIN_AXES })).toEqual([]);
   });
 
+  it("pairs contradictory bullets under one heading, ranked after cross-section pairs", () => {
+    /**
+     * Same-heading pairs used to be dropped outright, as "almost always one
+     * coherent instruction". Measured against a CLAUDE.md whose rules were
+     * grouped under headings — the normal way to write one — that produced ZERO
+     * candidate pairs, so `--semantic` sent nothing to the model and reported a
+     * clean run. An inert paid feature is worse than a noisy one.
+     *
+     * They are now demoted rather than dropped: judged only after every
+     * cross-section pair. The genuinely-agreeing case the old skip protected
+     * against ("Always use tabs" + "Never use spaces") is handled upstream now,
+     * by classify() declining to read a rejection as a choice.
+     */
+    const crossSection = [
+      rule("Always indent with tabs, never spaces.", "/p/CLAUDE.md", 3, ["A"]),
+      rule("Every file must be indented with two spaces.", "/p/CLAUDE.md", 9, ["B"]),
+    ];
+    const sameSection = [
+      rule("Always indent with tabs, never spaces.", "/p/CLAUDE.md", 3, ["Style"]),
+      rule("Every file must be indented with two spaces.", "/p/CLAUDE.md", 4, ["Style"]),
+    ];
+
+    expect(buildCandidatePairs(sameSection, { axes: BUILTIN_AXES })).toHaveLength(1);
+
+    // ...and the cross-section pair outranks the co-located one when both exist.
+    const mixed = [...crossSection, ...sameSection];
+    const pairs = buildCandidatePairs(mixed, { axes: BUILTIN_AXES });
+    expect(pairs.length).toBeGreaterThan(0);
+    const first = pairs[0]!;
+    const firstIsCrossSection = first.a.headings.join("/") !== first.b.headings.join("/");
+    expect(firstIsCrossSection).toBe(true);
+  });
+
   it("does not pair identical rules — those are duplicates, not conflicts", () => {
     const rules = [
       rule("Always run the test suite before committing.", "/p/CLAUDE.md", 3),
@@ -175,10 +208,37 @@ describe("axis classification", () => {
     expect(classify("Use 2-space indentation.")[0]?.side.name).toBe("spaces");
   });
 
-  it("abstains when a rule mentions both sides", () => {
-    // "tabs, not spaces" is one decision. Reporting it as self-conflicting
-    // would be the archetypal heuristic false positive.
-    expect(classify("Use tabs, never spaces.")).toEqual([]);
+  it("resolves a rule that names both sides to the one it is choosing", () => {
+    /**
+     * This used to abstain, on the reasoning that reporting "tabs, never spaces"
+     * as self-conflicting would be the archetypal false positive. The fear was
+     * misplaced: classifying a rule is not the same as conflicting it with
+     * itself — `memory/axis-conflict` only pairs DISTINCT rules and skips pairs
+     * whose sides agree, so nothing here can self-conflict.
+     *
+     * Abstaining had a real cost. `X, never Y` is one of the most natural ways
+     * to state a preference, so the clearest possible statement of a choice was
+     * invisible to conflict detection, while the vaguer "Use tabs" classified
+     * fine. Verified against a real project fixture: adding ", never spaces"
+     * made an otherwise-detected conflict disappear.
+     */
+    expect(classify("Use tabs, never spaces.")[0]?.side.name).toBe("tabs");
+    expect(classify("Prefer spaces rather than tabs.")[0]?.side.name).toBe("spaces");
+  });
+
+  it("leaves a lone rejection unclassified rather than inferring the opposite", () => {
+    // "Never use spaces" rejects one side and picks none. Reading it as a vote
+    // FOR spaces made it a false conflict against a neighbouring "Always use
+    // tabs" — two rules that plainly agree. Inferring "therefore tabs" would
+    // work on a two-sided axis and break on package managers, which have four.
+    expect(classify("Never use spaces for indentation.")).toEqual([]);
+    expect(classify("Avoid tabs.")).toEqual([]);
+  });
+
+  it("is not confused by a negation elsewhere in the rule", () => {
+    // The old `tabs` pattern carried `(?!.*\bnot\b)`, so any later "not"
+    // suppressed the match entirely and the rule expressed no opinion.
+    expect(classify("Use tabs; do not commit generated files.")[0]?.side.name).toBe("tabs");
   });
 });
 

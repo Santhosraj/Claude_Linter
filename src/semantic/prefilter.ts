@@ -118,16 +118,41 @@ export function buildCandidatePairs(
   const rarity = (term: string) =>
     Math.log(rules.length / Math.max(1, docFreq.get(term) ?? 1));
 
-  const candidates: { pair: CandidatePair; score: number }[] = [];
+  /**
+   * Ranking tiers, best first. Explicit rather than encoded as score arithmetic,
+   * because the two signals are on incomparable scales — an axis match is a flat
+   * 1000 and vocabulary overlap is a rarity sum, so any penalty constant chosen
+   * to demote one within the other's range is a magic number waiting to collide.
+   */
+  const enum Tier {
+    AxisCrossSection = 0,
+    AxisSameSection = 1,
+    VocabCrossSection = 2,
+    VocabSameSection = 3,
+  }
+
+  const candidates: { pair: CandidatePair; tier: Tier; score: number }[] = [];
 
   for (const { i, j, shared } of scored.values()) {
     const a = rules[i]!;
     const b = rules[j]!;
 
-    // Two bullets under the same heading in the same file are almost always one
-    // coherent instruction, not a conflict. Skipping them is the single biggest
-    // precision win available to the prefilter.
-    if (a.file === b.file && a.headings.join("/") === b.headings.join("/")) continue;
+    /**
+     * Same heading, same file. This used to `continue` — described as "almost
+     * always one coherent instruction" and "the single biggest precision win".
+     * The precision argument is real, but the blackout was absolute: a
+     * CLAUDE.md that groups rules under headings, which is how they are
+     * normally written, yielded ZERO candidate pairs, so `--semantic` sent
+     * nothing to the model and reported a clean run. A paid feature that is
+     * inert on the common shape is worse than a noisy one.
+     *
+     * So co-located pairs are demoted rather than dropped: they are judged only
+     * after every cross-section pair, and only if budget remains. Precision is
+     * preserved where it was actually coming from — spending the cap on the
+     * strongest signals — and the judge's `insufficient_evidence` verdict exists
+     * precisely so the prefilter can afford to be generous.
+     */
+    const sameSection = a.file === b.file && a.headings.join("/") === b.headings.join("/");
 
     // Identical rules are handled by the duplicate detector, not here.
     if (a.normalized === b.normalized) continue;
@@ -141,6 +166,7 @@ export function buildCandidatePairs(
           b,
           reason: `both rules mention the same known decision axis ("${sharedAxis}")`,
         },
+        tier: sameSection ? Tier.AxisSameSection : Tier.AxisCrossSection,
         // An explicit axis match is the strongest signal available, so it
         // outranks any amount of incidental vocabulary overlap.
         score: 1000,
@@ -155,14 +181,16 @@ export function buildCandidatePairs(
           b,
           reason: `they share the terms ${shared.slice(0, 5).map((t) => `"${t}"`).join(", ")}`,
         },
+        tier: sameSection ? Tier.VocabSameSection : Tier.VocabCrossSection,
         score: shared.reduce((n, t) => n + rarity(t), 0),
       });
     }
   }
 
-  // Rank by signal, then break ties deterministically so cached runs and CI
-  // output stay stable.
+  // Rank by tier, then by signal strength within it, then break ties
+  // deterministically so cached runs and CI output stay stable.
   candidates.sort((p, q) => {
+    if (p.tier !== q.tier) return p.tier - q.tier;
     if (q.score !== p.score) return q.score - p.score;
     const byFile =
       p.pair.a.file.localeCompare(q.pair.a.file) || p.pair.b.file.localeCompare(q.pair.b.file);

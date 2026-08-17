@@ -226,10 +226,18 @@ function axisConflicts(ctx: RuleContext, axes: Axis[]): Diagnostic[] {
         // Identical text is a duplicate, not a conflict — already reported above.
         if (a.rule.normalized === b.rule.normalized) continue;
 
-        const sameSection =
-          a.rule.file === b.rule.file &&
-          a.rule.headings.join("/") === b.rule.headings.join("/");
-        if (sameSection) continue;
+        /**
+         * Rules under the same heading used to be skipped entirely, with no
+         * comment saying why. Presumably to avoid flagging deliberately
+         * complementary rules ("tabs for indentation, spaces for alignment"),
+         * but it was unconditional — so two directly contradictory bullets two
+         * lines apart under one heading reported clean, which is the clearest
+         * case this rule exists to catch.
+         *
+         * Co-location is not evidence of compatibility, and the precision lever
+         * for this rule is its tier, not its pairing: it is `info`, off by
+         * default, and hedged as "Possible conflict".
+         */
 
         const pairKey = [axisId, a.rule.normalized, b.rule.normalized].sort().join("|");
         if (reportedPairs.has(pairKey)) continue;

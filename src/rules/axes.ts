@@ -31,7 +31,12 @@ export const BUILTIN_AXES: Axis[] = [
     id: "indentation",
     label: "indentation style",
     sides: [
-      { name: "tabs", patterns: [/\btabs?\b(?!.*\bnot\b)/i] },
+      // No negative lookahead here. It used to read `(?!.*\bnot\b)`, which made
+      // the word "tabs" fail to match whenever "not" appeared ANYWHERE later in
+      // the rule — so "Use tabs; do not commit generated files" was classified as
+      // having no indentation opinion at all. Negation is now resolved centrally
+      // in `classify`, against the text preceding each match.
+      { name: "tabs", patterns: [/\btabs?\b/i] },
       { name: "spaces", patterns: [/\bspaces\b/i, /\b[24][- ]space/i] },
     ],
   },
@@ -103,15 +108,62 @@ export interface AxisMatch {
   side: AxisSide;
 }
 
-/** Which side of which axis (if any) this rule text picks. */
+/**
+ * Words that mark the side named AFTER them as the rejected one.
+ *
+ * Anchored to the end of the preceding text, so only a cue immediately before
+ * the match counts — and bounded to the current clause, since a negation in an
+ * earlier sentence says nothing about this mention.
+ */
+const NEGATION_CUE =
+  /\b(?:never|not|no|avoid|without|don'?t|doesn'?t|instead\s+of|rather\s+than|over|versus|vs\.?)\s+[^.;\n]{0,24}$/i;
+
+/** Is at least one mention of this side stated positively rather than rejected? */
+function sideIsChosen(text: string, side: AxisSide): boolean {
+  for (const pattern of side.patterns) {
+    const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+    for (const match of text.matchAll(new RegExp(pattern.source, flags))) {
+      if (match.index === undefined) continue;
+      if (!NEGATION_CUE.test(text.slice(0, match.index))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Which side of which axis (if any) this rule text picks.
+ *
+ * A rule naming both sides used to be skipped outright, on the reasoning that we
+ * could not tell which side it had picked. We usually can: "Always indent with
+ * tabs, never spaces" names the rejected side right after a negation. Giving up
+ * there was costly, because `X, never Y` is one of the most natural ways to write
+ * a rule — so the clearest possible statement of a preference was invisible,
+ * while the vaguer "Always indent with tabs" was classified fine.
+ *
+ * Still skipped when negation cannot settle it: no side stated positively, or
+ * more than one. Guessing between two positive mentions would invent an opinion
+ * the rule does not express.
+ */
 export function classify(text: string, axes: Axis[] = BUILTIN_AXES): AxisMatch[] {
   const out: AxisMatch[] = [];
   for (const axis of axes) {
     const hits = axis.sides.filter((side) => side.patterns.some((p) => p.test(text)));
-    // A rule that mentions both sides of an axis ("tabs, not spaces") is making
-    // one choice, not conflicting with itself — we cannot tell which side it
-    // picked, so we skip rather than guess.
-    if (hits.length === 1 && hits[0]) out.push({ axis, side: hits[0] });
+    if (hits.length === 0) continue;
+
+    /**
+     * Negation is checked even when only one side matched, which matters as much
+     * as the both-sides case: "Never use spaces for indentation" mentions exactly
+     * one side and *rejects* it. Reading that as a vote FOR spaces turned it into
+     * a false conflict against a neighbouring "Always use tabs" — two rules that
+     * plainly agree.
+     *
+     * A lone rejection leaves the rule unclassified rather than inferring the
+     * opposite. On a two-sided axis "not spaces" does imply tabs, but axes here
+     * can have four sides (package managers), where rejecting one says nothing
+     * about which of the rest was chosen.
+     */
+    const chosen = hits.filter((side) => sideIsChosen(text, side));
+    if (chosen.length === 1 && chosen[0]) out.push({ axis, side: chosen[0] });
   }
   return out;
 }

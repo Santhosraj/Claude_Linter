@@ -1,10 +1,52 @@
 # cclint
 
+[![npm](https://img.shields.io/npm/v/%40santhosraj%2Fcclint?color=cb3837&label=npm)](https://www.npmjs.com/package/@santhosraj/cclint)
+[![CI](https://github.com/Santhosraj/Claude_Linter/actions/workflows/ci.yml/badge.svg)](https://github.com/Santhosraj/Claude_Linter/actions/workflows/ci.yml)
+[![Action self-test](https://github.com/Santhosraj/Claude_Linter/actions/workflows/action-selftest.yml/badge.svg)](https://github.com/Santhosraj/Claude_Linter/actions/workflows/action-selftest.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Lint the configuration a Claude Code project accumulates — `CLAUDE.md`, hooks,
 MCP servers — for the failures that are silent until the agent starts behaving
 oddly: dead references, config that a higher layer quietly overrides,
 instructions that contradict each other, and context you're paying for on every
 turn without realising it.
+
+```bash
+npx @santhosraj/cclint@latest --strict
+```
+
+Real output, on a project with three ordinary mistakes in it:
+
+```
+.claude\settings.json
+  4:59      warn   Hook command path does not exist: .claude/hooks/guard.sh  hooks/dead-command
+            │ Checked relative to the project root.
+  8:15      warn   2 `permissions.allow` entries are ignored: this workspace has not been trusted.  permissions/untrusted-workspace
+            │ Claude Code drops project-level allow entries until the workspace is trusted.
+            │ Run Claude Code interactively here once and accept the trust dialog, or set
+            │   projects["D:/tmp/api"].hasTrustDialogAccepted: true
+            │   in D:/tmp/api/.home/.claude.json
+            │ `deny` and `ask` are unaffected, as is your user-level allow list.
+            │ Both project files are gated: settings.json and settings.local.json.
+
+CLAUDE.md
+  8:1       info   Possible conflict on indentation style: "tabs" vs "spaces".  memory/axis-conflict
+            │ CLAUDE.md:4 — Use tabs for indentation in this repo.
+            │ CLAUDE.md:8 — Never use tabs; the formatter enforces spaces everywhere.
+            │ Both files are in context simultaneously; neither overrides the other.
+
+2 warnings, 1 info
+```
+
+Three failures, none of which announces itself while you work. The hook never
+fires — the script it names does not exist, and Claude Code says nothing. The two
+`allow` entries do nothing either, because Claude Code discards project-level
+allow lists until the workspace is trusted, so you keep approving the commands
+you thought you had pre-approved. And the two indentation rules are in context
+*simultaneously* — nothing overrides anything in `CLAUDE.md`, so the agent picks
+one at random and you get whichever it read last.
+
+Then the whole surface:
 
 ```bash
 npm install -g @santhosraj/cclint@latest  # the command it installs is `cclint`
@@ -14,8 +56,6 @@ cclint doctor                          # what was discovered, and why
 cclint explain hooks.PreToolUse
 cclint budget
 ```
-
-Or run it once without installing: `npx @santhosraj/cclint doctor`.
 
 The package is scoped; the command is not. `cclint` is what you type after
 installing, and it is the name used throughout this document. The unscoped

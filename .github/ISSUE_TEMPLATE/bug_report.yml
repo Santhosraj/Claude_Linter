@@ -1,0 +1,89 @@
+name: Bug report
+description: A finding that is wrong, a finding that should have appeared, or a crash.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please redact secrets.** Settings files can hold API keys in `env` blocks and
+        MCP `headers`. None of that is needed to reproduce a finding — replace values
+        with `REDACTED`.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem is this?
+      options:
+        - False positive — cclint reported something that is not actually wrong
+        - False negative — cclint missed something it should have caught
+        - Wrong explanation — the finding is right but what it says about it is not
+        - Crash or error
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What does Claude Code actually do here?
+      description: >
+        The most valuable part of the report. Say what you expected Claude Code to do
+        with this config and, if you know, how you know — a docs link, or behaviour you
+        observed. This project's accuracy is bounded by how well its model of Claude
+        Code matches the real binary, and this is the input it cannot generate itself.
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: The config that triggers it
+      description: Reduced as far as you can. Secrets replaced with REDACTED.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output of `cclint doctor`
+      description: >
+        This prints the project root, the marker that decided it, which files were read,
+        and the trust key — which is where most surprising results come from. Paste it
+        even if it looks unremarkable.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: finding
+    attributes:
+      label: The finding itself
+      description: The relevant lines from `cclint` or `cclint --strict`.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: cclint version
+      description: Output of `cclint --version`.
+      placeholder: "0.2.4"
+    validations:
+      required: true
+
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: >
+        Output of `claude --version`, if you have it installed. A mismatch against the
+        version cclint's fixtures were recorded with is a common cause.
+      placeholder: "2.1.233"
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Node version
+      placeholder: "Windows 11, Node 22.11.0"
+    validations:
+      required: true

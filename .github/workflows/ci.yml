@@ -6,6 +6,37 @@ on:
   pull_request:
 
 jobs:
+  # An unparseable workflow file cannot report itself: GitHub produces a run with
+  # ZERO jobs, titled with the file path instead of the workflow name, and no step
+  # exists to say why. That happened here once — a commit whose entire content
+  # went untested behind what looked like an ordinary red X.
+  #
+  # So the check lives in a DIFFERENT file from the one most likely to break. Its
+  # own job, not a matrix step: YAML does not parse differently per OS, and the
+  # first attempt put it in the matrix on the wrong assumption that PyYAML ships
+  # with every runner's python. It does not — only ubuntu's, which is exactly the
+  # runner this job pins.
+  yaml:
+    name: Workflow and action files parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import sys, glob, yaml
+          bad = 0
+          for f in sorted(glob.glob(".github/workflows/*.yml")) + ["action.yml"]:
+              try:
+                  yaml.safe_load(open(f, encoding="utf-8"))
+                  print("ok  ", f)
+              except Exception as e:
+                  bad = 1
+                  print(f"::error file={f}::{e}")
+          sys.exit(bad)
+          '
+
   test:
     # The whole tool is path handling, and it has only ever been developed on
     # Windows. POSIX is where the untested risk lives — `\`-to-`/` normalisation,
@@ -21,31 +52,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # An unparseable workflow file cannot report itself: GitHub produces a run
-      # with ZERO jobs, titled with the file path instead of the workflow name,
-      # and no step exists to say why. That happened once here — a commit whose
-      # entire content went untested while looking like an ordinary red X.
-      #
-      # This check lives in a DIFFERENT file from the one most likely to break,
-      # so it still runs and still names the error. PyYAML is preinstalled on all
-      # three runners, so this costs no dependency.
-      - name: Every workflow and action file must parse as YAML
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -c '
-          import sys, glob, yaml
-          bad = 0
-          for f in sorted(glob.glob(".github/workflows/*.yml")) + ["action.yml"]:
-              try:
-                  yaml.safe_load(open(f, encoding="utf-8"))
-                  print("ok  ", f)
-              except Exception as e:
-                  bad = 1
-                  print("FAIL", f, "->", e)
-          sys.exit(bad)
-          '
 
       - uses: actions/setup-node@v4
         with:

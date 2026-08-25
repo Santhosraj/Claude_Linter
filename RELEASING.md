@@ -117,8 +117,11 @@ each of its releases. The tool's accuracy is bounded by how well its model of
 Claude Code matches the real binary, and that is the only mechanism that keeps
 the two in step.
 
-You no longer have to remember. `.github/workflows/conformance-drift.yml` asks npm
-weekly whether a newer Claude Code exists than the fixtures were recorded against,
-and opens a single tracking issue when one does — closing it again once you
-re-record. It detects the trigger, not the drift: the hook and runtime oracles need
-an authenticated binary, so re-recording still happens on your machine.
+You no longer have to remember. `.github/workflows/conformance-drift.yml` checks
+weekly and opens a single tracking issue — closing it again once you re-record. It
+alerts on a MINOR version bump or a 30-day staleness deadline, not on every patch:
+Claude Code ships patches most days, and re-recording across seven of them
+(2.1.233 to 2.1.240) changed nothing this tool models, so patch-level alerts made
+the check permanently red. It detects the trigger, not the drift — the hook and
+runtime oracles need an authenticated binary, so re-recording happens on your
+machine.

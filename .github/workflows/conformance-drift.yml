@@ -52,7 +52,11 @@ jobs:
     name: Are the fixtures still current?
     runs-on: ubuntu-latest
     steps:
+      # Full history: the staleness half of the check asks git when the fixtures
+      # last changed, and the default single-commit clone cannot answer that.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -82,7 +86,17 @@ jobs:
             version="0.0.0-simulated"
             echo "::warning::Simulating drift against $version to exercise the alert path."
           fi
-          node scripts/check-conformance-drift.mjs "$version"
+          # How long since anyone re-recorded. The checker alerts on this even when
+          # the version has not moved, because fixtures can rot without a release.
+          last="$(git log -1 --format=%ct -- test/fixtures || true)"
+          if [ -n "$last" ]; then
+            age=$(( ( $(date +%s) - last ) / 86400 ))
+            echo "fixtures last changed $age day(s) ago"
+          else
+            age=""
+            echo "::warning::could not determine fixture age from git history"
+          fi
+          node scripts/check-conformance-drift.mjs "$version" $age
 
       # One issue, not one per week. If a tracking issue is already open we leave
       # it alone — a weekly comment saying the same thing is how people learn to
@@ -93,6 +107,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TITLE: Conformance fixtures need re-recording
           RECORDED: ${{ steps.drift.outputs.recorded }}
+          REASON: ${{ steps.drift.outputs.reason }}
           # The version actually COMPARED, from the drift step — not the raw npm
           # answer from the step above. Under `simulate-drift` those differ, and
           # the first real test of this path produced a body whose summary said
@@ -117,6 +132,7 @@ jobs:
           |---|---|
           | recorded in fixtures | \`$RECORDED\` |
           | current on npm | \`$CURRENT\` |
+          | why this fired | $REASON |
 
           ### Why this matters
 
@@ -138,6 +154,15 @@ jobs:
           A behaviour change shows up as a failing test with a readable diff. No
           diff means the new release behaves the same, and the only change is the
           version stamp — commit it anyway, so this stops firing.
+
+          ### Why a patch release does not trigger this
+
+          Patch releases are reported and not alerted on. Re-recording across seven of them
+          (2.1.233 to 2.1.240) changed nothing cclint models — identical hook execution
+          orders, the same valid-hook-event list, the same trust-gating counts. Claude Code
+          ships patches most days, so alerting on each one made this permanently red, and a
+          permanently red check is one nobody reads. A minor bump alerts, and so does a
+          30-day staleness deadline.
 
           ### Why this is not automated
 

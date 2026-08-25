@@ -1,5 +1,5 @@
 {
-  "claudeVersion": "2.1.233",
+  "claudeVersion": "2.1.240",
   "servers": {
     "good-server": {
       "status": "ok"

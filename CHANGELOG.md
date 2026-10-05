@@ -15,7 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, a minor bump may change finding output.
 
-## [Unreleased]
+## [0.3.0] — 2026-10-05
 
 Three correctness fixes, all found by running cclint over 11 real `CLAUDE.md`
 files and checking every finding against the file it pointed at. Finding output
@@ -238,6 +238,7 @@ Initial public release: deterministic linting of `CLAUDE.md`, hooks, MCP
 servers, settings, and permissions, with SARIF output, a GitHub Action, and an
 opt-in semantic pass.
 
+[0.3.0]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.3.0
 [0.2.5]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.2.5
 [0.2.4]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.2.4
 [0.2.3]: https://github.com/Santhosraj/Claude_Linter/releases/tag/v0.2.3

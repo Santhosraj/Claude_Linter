@@ -160,4 +160,14 @@ export interface MemorySource {
   /** Files pulled in via `@path` imports, resolved transitively. */
   imports: string[];
   rules: MemoryRule[];
+  /**
+   * When this file is in context. `undefined` means every turn. A directory
+   * means only while Claude works under it: a subdirectory CLAUDE.md is loaded
+   * on demand, and so is anything it imports.
+   *
+   * Pairing rules (duplicates, conflicts) consult this, because two files in
+   * sibling subtrees are never loaded by working in one place — and a different
+   * convention per subtree is the point of nested CLAUDE.md, not a conflict.
+   */
+  loadScope?: string;
 }

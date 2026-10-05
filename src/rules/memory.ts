@@ -15,6 +15,7 @@ import { scanMarkdown } from "../parse/markdown.js";
 import { BUILTIN_AXES, classify, type Axis } from "./axes.js";
 import { SEVERITY, type RuleContext } from "./context.js";
 import type { Diagnostic, MemoryRule } from "../model/types.js";
+import { ALWAYS, loadScopeIndex, sharedLoadScope } from "../model/load-scope.js";
 
 /**
  * Memory filenames Claude Code recognises, in the exact casing it matches.
@@ -111,24 +112,52 @@ export function memoryRules(ctx: RuleContext, axes: Axis[] = BUILTIN_AXES): Diag
     }
   }
 
+  const scopeOf = loadScopeIndex(ctx.memory);
+
   for (const [, group] of byNormalized) {
     if (group.length < 2) continue;
-    const [first, ...rest] = group;
-    if (!first) continue;
 
-    const sameFile = rest.every((r) => r.file === first.file);
-    for (const dup of rest) {
+    for (let i = 1; i < group.length; i++) {
+      const dup = group[i]!;
+      const sameFile = group.slice(0, i).find((r) => r.file === dup.file);
+
+      // Pair each repeat with the earliest copy it is actually loaded alongside.
+      // Copies in sibling subtrees never are, so they are not redundancy — a
+      // project that keeps the same CLAUDE.md in two demo folders is not paying
+      // for it twice.
+      let first = sameFile;
+      let where: string | undefined;
+      if (!first) {
+        for (const earlier of group.slice(0, i)) {
+          const shared = sharedLoadScope(scopeOf(earlier.file), scopeOf(dup.file));
+          if (shared !== undefined) {
+            first = earlier;
+            where = shared;
+            break;
+          }
+        }
+      }
+      if (!first) continue;
+
+      const always = sameFile !== undefined
+        ? scopeOf(dup.file) === undefined
+        : where === ALWAYS;
+      const under = !always ? relative(root, sameFile ? (scopeOf(dup.file) ?? root) : where!) : "";
+      const loaded = always ? "every turn" : `whenever Claude works under ${under || "."}`;
+
       out.push({
         ruleId: sameFile ? "memory/duplicate-rule" : "memory/redundant-across-layers",
         severity: SEVERITY.environmental,
         message: sameFile
           ? "This rule is stated twice in the same file."
-          : "This rule is already stated in another CLAUDE.md that is also always in context.",
+          : always
+            ? "This rule is already stated in another CLAUDE.md that is also always in context."
+            : `This rule is already stated in another CLAUDE.md that loads alongside it under ${under || "."}.`,
         file: dup.file,
         position: dup.position,
         detail: [
           `First stated at ${relative(root, first.file)}:${first.position.line}`,
-          "Both copies are loaded every turn — the repetition costs tokens without adding instruction.",
+          `Both copies are loaded ${loaded} — the repetition costs tokens without adding instruction.`,
         ],
         data: { text: dup.text, firstFile: first.file, firstLine: first.position.line },
       });
@@ -212,6 +241,7 @@ function axisConflicts(ctx: RuleContext, axes: Axis[]): Diagnostic[] {
   // A rule duplicated across three files would otherwise produce the same
   // conflict three times over. Users read that as three problems.
   const reportedPairs = new Set<string>();
+  const scopeOf = loadScopeIndex(ctx.memory);
 
   for (const [axisId, entries] of byAxis) {
     const sides = new Set(entries.map((e) => e.side));
@@ -225,6 +255,11 @@ function axisConflicts(ctx: RuleContext, axes: Axis[]): Diagnostic[] {
 
         // Identical text is a duplicate, not a conflict — already reported above.
         if (a.rule.normalized === b.rule.normalized) continue;
+
+        // Never in context together, so never in conflict. "Tabs in frontend/,
+        // spaces in backend/" is what nested CLAUDE.md files are FOR.
+        const shared = sharedLoadScope(scopeOf(a.rule.file), scopeOf(b.rule.file));
+        if (shared === undefined) continue;
 
         /**
          * Rules under the same heading used to be skipped entirely, with no
@@ -253,7 +288,11 @@ function axisConflicts(ctx: RuleContext, axes: Axis[]): Diagnostic[] {
           detail: [
             `${relative(ctx.discovery.projectRoot, a.rule.file)}:${a.rule.position.line} — ${a.rule.text}`,
             `${relative(ctx.discovery.projectRoot, b.rule.file)}:${b.rule.position.line} — ${b.rule.text}`,
-            "Both files are in context simultaneously; neither overrides the other.",
+            shared === ALWAYS
+              ? "Both files are in context simultaneously; neither overrides the other."
+              : `Both are in context whenever Claude works under ${
+                  relative(ctx.discovery.projectRoot, shared) || "."
+                }; neither overrides the other.`,
           ],
           data: { axis: axisId, sides: [a.side, b.side] },
         });

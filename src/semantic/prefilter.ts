@@ -41,6 +41,11 @@ export interface PrefilterOptions {
    * while 142 rules were never compared to each other at all.
    */
   maxPairsPerRule?: number;
+  /**
+   * Whether two rules can be in context at the same time. Absent means always —
+   * the right default for callers that only hand it always-loaded rules.
+   */
+  canPair?: (a: MemoryRule, b: MemoryRule) => boolean;
 }
 
 export function buildCandidatePairs(
@@ -136,6 +141,10 @@ export function buildCandidatePairs(
   for (const { i, j, shared } of scored.values()) {
     const a = rules[i]!;
     const b = rules[j]!;
+
+    // Rules that are never in context together cannot conflict, and judging
+    // them spends pair budget on a question with no answer worth having.
+    if (options.canPair && !options.canPair(a, b)) continue;
 
     /**
      * Same heading, same file. This used to `continue` — described as "almost

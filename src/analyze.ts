@@ -3,7 +3,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { discover, isFile, relative as relativePath, type DiscoveryOptions } from "./discovery/layers.js";
 import { parseAxes, BUILTIN_AXES, type Axis } from "./rules/axes.js";
@@ -25,6 +25,7 @@ import {
 } from "./tokens/budget.js";
 import { TokenCounter } from "./tokens/counter.js";
 import type { Diagnostic, MemorySource, Severity } from "./model/types.js";
+import { loadScopeIndex, sharedLoadScope } from "./model/load-scope.js";
 import type { RuleContext } from "./rules/context.js";
 
 export interface AnalyzeOptions extends DiscoveryOptions {
@@ -160,14 +161,22 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
   // contradict one in CLAUDE.md — and analysing only the top-level files would
   // silently miss every such conflict.
   const memory: MemorySource[] = [];
-  const seenMemory = new Set<string>();
+  const seenMemory = new Map<string, MemorySource>();
 
   for (const entry of discovery.memory) {
+    // A subdirectory CLAUDE.md, and everything it imports, loads only while
+    // Claude works under that directory. Everything else loads every turn.
+    const loadScope = entry.layer === "subdirectory" ? dirname(entry.file) : undefined;
     const chain = expandImports(entry.file, new Set());
     for (const file of chain) {
       const key = resolve(file);
-      if (seenMemory.has(key)) continue;
-      seenMemory.add(key);
+      const seen = seenMemory.get(key);
+      if (seen) {
+        // Imported by both an always-loaded file and a scoped one: it is in
+        // context every turn. Widen rather than keep whichever chain came first.
+        if (loadScope === undefined) seen.loadScope = undefined;
+        continue;
+      }
 
       let text: string;
       try {
@@ -178,13 +187,16 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
       const isRoot = resolve(file) === resolve(entry.file);
       const layer = isRoot ? entry.layer : "import";
       const scanned = scanMarkdown(text);
-      memory.push({
+      const source: MemorySource = {
         file,
         layer,
         text,
         imports: scanned.imports.map((i) => i.target),
         rules: toRules(scanned, file, layer),
-      });
+        ...(loadScope !== undefined ? { loadScope } : {}),
+      };
+      seenMemory.set(key, source);
+      memory.push(source);
     }
   }
 
@@ -214,9 +226,11 @@ export async function analyze(options: AnalyzeOptions = {}): Promise<AnalysisRes
   let semantic: SemanticSummary | undefined;
   if (options.semantic === true) {
     const allRules = memory.flatMap((m) => m.rules);
+    const scopeOf = loadScopeIndex(memory);
     const pairs = buildCandidatePairs(allRules, {
       axes,
       maxPairs: options.semanticMaxPairs ?? 40,
+      canPair: (a, b) => sharedLoadScope(scopeOf(a.file), scopeOf(b.file)) !== undefined,
     });
     const adjudicator = new SemanticAdjudicator({
       apiKey: options.apiKey,

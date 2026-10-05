@@ -139,7 +139,11 @@ Deterministic findings only, by default. `--strict` adds heuristic ones.
   scripts that don't exist, commands not on `PATH`, matchers naming no known tool
 - **mcp** — malformed server entries, unknown transports, unparseable URLs,
   duplicate server names across scopes, unset `$VAR` references
-- **settings** — values overridden by a higher-precedence layer, unrecognised keys
+- **settings** — values overridden by a higher-precedence layer, and misspelt
+  keys: `"modle": "opus"` is reported as *did you mean `model`?*. Claude Code
+  ignores an unknown key without a word, so a typo looks exactly like a setting
+  that did not work. Only near-misses of a known key are reported — a key far
+  from every known one is far more often real but newer than any list.
 - **permissions** — entries already covered by a broader wildcard, exact
   duplicates, paths that cannot exist, and — the one people are most surprised
   by — **project-level `allow` entries that Claude Code is ignoring entirely
@@ -147,11 +151,17 @@ Deterministic findings only, by default. `--strict` adds heuristic ones.
   boundary is pinned by a conformance fixture: only `allow`, only from a project
   layer. `deny`, `ask`, and your own user-level `allow` keep working.
 - **memory** — dead `@imports`, import cycles, rules duplicated within a file or
-  across two files that are both always in context, and a `claude.md` that differs
+  across two files that are loaded together, and a `claude.md` that differs
   from `CLAUDE.md` only by **case**. That last one is invisible on the machine
   that has it: Claude Code matches the name literally, so the file is memory on
   Windows and macOS and nothing at all on Linux or in CI, where the instructions
   in it silently stop applying. Both projects I first ran this against had one.
+
+  "Loaded together" is the important qualifier. A nested `CLAUDE.md` loads only
+  while Claude works under its directory, so files in sibling subtrees are never
+  paired: tabs in `frontend/` and spaces in `backend/` is what nested files are
+  for, not a conflict. A nested file is still checked against the root, and the
+  finding says where both are in context rather than claiming "every turn."
 - **budget** — with `--strict`, an always-loaded context large enough to be worth
   knowing about (10k+ tokens spent before your prompt, every turn). `info`,
   because a big `CLAUDE.md` can be entirely deliberate — but a green checkmark

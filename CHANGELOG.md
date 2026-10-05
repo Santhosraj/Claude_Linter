@@ -15,6 +15,62 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is `0`, a minor bump may change finding output.
 
+## [Unreleased]
+
+Three correctness fixes, all found by running cclint over 11 real `CLAUDE.md`
+files and checking every finding against the file it pointed at. Finding output
+changes, so this is a minor release: expect **more** rules analysed and **fewer**
+false positives.
+
+### Correctness — most instructions were never analysed
+
+- A rule written as a plain imperative was discarded before any check saw it.
+  The extraction filter admitted only blocks containing one of twenty hint words
+  (`always`, `never`, `use`, `prefer`…), so *"Keep every function under 20
+  lines"*, *"Store all timestamps in UTC"* and *"Pin direct dependencies"* were
+  invisible to duplicate detection, the axis check and the semantic pass alike.
+  Measured on the 11 files: **70% of blocks were rejected**, and in five of them
+  94–100% — one file produced no rules at all, so every memory check saw an
+  empty file and reported it clean. Imperatives are now recognised, along with
+  `No …` prohibitions and instructions after a condition, dash, arrow or label.
+  Across the corpus, analysed blocks rose from 30% to 48% with **zero** blocks
+  lost that were analysed before.
+- The scanner no longer reads document structure as prose. A `---` separator was
+  becoming a "paragraph" (33 in one corpus), a table row was glued onto the
+  surrounding text — so a cell containing "use" made the table a rule — and YAML
+  frontmatter was read as a block of rules. HTML comments are skipped too, except
+  inside a code span, where the rule is showing one as an example.
+
+### Correctness — nested CLAUDE.md files were treated as always loaded
+
+- Duplicate and conflict findings assumed every `CLAUDE.md` is in context every
+  turn, while the budget report rightly treated nested ones as on demand. In a
+  project whose root is one large repository, a rule in one client folder was
+  reported as *"already stated in another CLAUDE.md that is also always in
+  context"* — pointing at an unrelated project Claude Code never loads while
+  working in the first. **44 such findings across three real projects, all
+  false.** Files in sibling subtrees are no longer paired; different conventions
+  per subtree are what nested files are for. A nested file is still checked
+  against the root and against its own ancestors, and the finding now says where
+  both copies load instead of "every turn". Imported files inherit the scope of
+  the file that imports them. The semantic prefilter applies the same rule, so
+  `--semantic` no longer spends pair budget on rules that are never in context
+  together.
+
+### Correctness — real settings keys reported as unrecognised
+
+- `settings/unknown-key` treated "absent from the 32-rule merge table" as
+  "unrecognised", so real keys like `autoMemoryEnabled` and `modelSettings` were
+  reported. It now reports only near-misses of a known key, and names the one
+  probably intended: `"modle"` → *did you mean `model`?*, including case-only
+  differences, since JSON keys are case-sensitive. The known list combines the
+  SchemaStore schema (142 keys) with documented keys it lacks. No list is
+  complete — Claude Code writes `switchModelsOnFlag` into user settings and
+  neither source lists it — so absence alone is never reported. Verified against
+  the binary that this check is worth having: `claude doctor` flags an unknown
+  hook event but says nothing about an unknown top-level key, so a typo really is
+  silent.
+
 ## [0.2.5] — 2026-08-17
 
 No behaviour change: `src/` is byte-identical to 0.2.4. This release exists so the

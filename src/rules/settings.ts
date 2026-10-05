@@ -12,7 +12,8 @@
  * tell users to delete hooks that are actually running.
  */
 
-import { isAdditive, ruleFor } from "../model/merge-semantics.js";
+import { isAdditive, MERGE_RULES, ruleFor } from "../model/merge-semantics.js";
+import { suggestSettingsKey } from "../model/known-settings.js";
 import { LAYER_LABEL } from "../model/types.js";
 import { relative } from "../discovery/layers.js";
 import { SEVERITY, type RuleContext } from "./context.js";
@@ -66,11 +67,20 @@ export function settingsRules(ctx: RuleContext): Diagnostic[] {
     }
   }
 
-  // Unknown keys: worth surfacing, because a typo'd key is silently ignored by
-  // Claude Code and looks identical to a setting that simply did not work.
+  // Misspelt keys: worth surfacing, because Claude Code ignores an unknown key
+  // without a word, so a typo looks identical to a setting that did not work.
+  //
+  // This used to report every key absent from the merge-semantics table, which
+  // covers 32 rules — so real keys like `autoMemoryEnabled` and `modelSettings`
+  // were "unrecognised". It now reports only a key that is a near-miss of a known
+  // one, and names the key it was probably meant to be. A key far from every
+  // known one is left alone: it is far more often real-but-unlisted than a typo.
+  const modelled = MERGE_RULES.map((r) => r.path).filter((p) => p !== "*" && !p.includes("."));
   for (const key of ctx.keys) {
     if (key.path.includes(".")) continue; // only check top-level
     if (ruleFor(key.path).path !== "*") continue;
+    const suggestion = suggestSettingsKey(key.path, modelled);
+    if (suggestion === undefined) continue;
     const first = key.contributions[0];
     if (!first) continue;
 
@@ -78,14 +88,18 @@ export function settingsRules(ctx: RuleContext): Diagnostic[] {
       ruleId: "settings/unknown-key",
       severity: SEVERITY.heuristic,
       heuristic: true,
-      message: `Unrecognised settings key \`${key.path}\`.`,
+      message: `Unrecognised settings key \`${key.path}\` — did you mean \`${suggestion}\`?`,
       file: first.file,
       position: first.position,
       detail: [
-        "Not present in the merge-semantics table. This may be a typo, or a key " +
-          "newer than this version of cclint.",
+        "Claude Code ignores unknown keys without warning, so this setting is not applied.",
+        `\`${suggestion}\` is a known key ${
+          suggestion.toLowerCase() === key.path.toLowerCase()
+            ? "differing only in case — JSON keys are case-sensitive"
+            : "a character or two away"
+        }.`,
       ],
-      data: { path: key.path },
+      data: { path: key.path, suggestion },
     });
   }
 

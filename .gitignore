@@ -30,3 +30,10 @@ test/fixtures/**/.hooklog
 # Vitest JSON report, written by `npm run test:strict` to verify that every
 # suite actually ran. Regenerated per run; never an artifact.
 .vitest/
+
+# Local secrets. This repo is public: a key committed here is a key published,
+# and rotating it is the only fix — removing the file later does not unpublish it.
+# `.env.example` stays trackable so the expected variable names can be documented.
+.env
+.env.*
+!.env.example
